@@ -156,6 +156,14 @@ function InkToolbar({ tool, setTool, color, setColor, width, setWidth, snap, set
   const [penOptions, setPenOptions] = useState(false);
   const penMenu = useRef<HTMLDivElement>(null);
   const settingsMenu = useRef<HTMLDivElement>(null);
+  const colorPicker = useRef<HTMLInputElement>(null);
+  const swatches = colors.includes(color) ? colors : [...colors, color];
+  const openColorPicker = () => {
+    const picker = colorPicker.current;
+    if (!picker) return;
+    try { if (picker.showPicker) picker.showPicker(); else picker.click(); }
+    catch { picker.click(); }
+  };
   useEffect(() => {
     const outside = (e: globalThis.PointerEvent) => {
       const target = e.target as HTMLElement;
@@ -178,7 +186,7 @@ function InkToolbar({ tool, setTool, color, setColor, width, setWidth, snap, set
         <small>Higher values vary the width more with stylus pressure. Set to 0 for an even stroke.</small>
       </div>}
     </div> : <IconButton key={key} label={`${label} (${shortcut})`} onClick={() => setTool(key)} active={tool === key} disabled={disabled}><Icon size={21} /></IconButton>)}</div><span className="toolbar-divider" />
-    <div className="toolbar-group colors">{colors.map(c => <button className={`color-choice ${c === color ? 'selected' : ''}`} key={c} aria-label={`Ink ${c}`} aria-pressed={c === color} style={{ '--swatch': c } as React.CSSProperties} onClick={() => setColor(c)}><span />{c === color && <Check size={12} color={c === '#ffffff' ? '#173e33' : 'white'} />}</button>)}</div><span className="toolbar-divider" />
+    <div className="toolbar-group colors">{swatches.map(c => <button className={`color-choice ${c === color ? 'selected' : ''}`} key={c} aria-label={c === color ? `Choose custom color, current ${c}` : `Ink ${c}`} aria-pressed={c === color} style={{ '--swatch': c } as React.CSSProperties} onClick={() => c === color ? openColorPicker() : setColor(c)}><span />{c === color && <Check size={12} color={c.toLowerCase() === '#ffffff' ? '#173e33' : 'white'} />}</button>)}<input ref={colorPicker} className="color-picker-input" type="color" value={color} aria-label="Choose ink color" onChange={e => setColor(e.currentTarget.value)} /></div><span className="toolbar-divider" />
     <div className="toolbar-group history"><IconButton label="Undo ink (Ctrl+Z)" onClick={() => send({ type: 'undo', slide })} disabled={disabled}><Undo2 size={19} /></IconButton><IconButton label="Redo ink (Ctrl+Shift+Z)" onClick={() => send({ type: 'redo', slide })} disabled={disabled}><Redo2 size={19} /></IconButton></div>
     <div className="settings-wrap" ref={settingsMenu}><IconButton label="Tool settings" onClick={() => { setSettings(!settings); setPenOptions(false); }} active={settings}><Settings2 size={19} /></IconButton>{settings && <div className="pen-settings"><strong>Tool settings</strong><label>Stroke width <span>{width} px</span><input className="tool-range" style={{ '--range-progress': `${(width - 2) / 8 * 100}%` } as React.CSSProperties} type="range" min="2" max="10" step="1" value={width} onChange={e => setWidth(Number(e.target.value))} /></label><label className="switch-label"><span>Snap line angles<small>Near 0°, 45°, and 90°</small></span><input type="checkbox" checked={snap} onChange={e => setSnap(e.target.checked)} /></label><label className="switch-label"><span>Draw with a finger<small>Turn off for palm rejection</small></span><input type="checkbox" checked={touch} onChange={e => setTouch(e.target.checked)} /></label><StylusButtonSettings binding={stylusBinding} onChange={setStylusBinding} /><p>Hold still for 0.55 s to straighten a stroke. Stylus side and eraser buttons erase strokes.</p><button className="danger-button" disabled={disabled} onClick={() => { send({ type: 'clear', slide }); setSettings(false); }}><Trash2 size={15} /> Clear ink on this slide</button><small>You can undo this.</small></div>}</div>
   </div>;

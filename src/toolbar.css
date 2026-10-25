@@ -57,6 +57,7 @@
 .unified-toolbar .color-choice > span { width: 22px; height: 22px; border: 1px solid #00000018; border-radius: 50%; background: var(--swatch); }
 .unified-toolbar .color-choice.selected > span { box-shadow: 0 0 0 3px #fcfdf8, 0 0 0 4px var(--swatch); }
 .unified-toolbar .color-choice > svg { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); }
+.unified-toolbar .color-picker-input { position: fixed; left: -10px; top: -10px; width: 1px; height: 1px; opacity: 0; pointer-events: none; }
 .unified-toolbar .viewport-controls > .zoom-menu-button { width: 80px; min-width: 80px; flex-basis: 80px; gap: 5px; font-size: 11px; font-variant-numeric: tabular-nums; }
 .unified-toolbar :is(.pen-settings, .pen-submenu, .view-submenu) { bottom: calc(100% + 12px); padding: 18px; border: 1px solid #d6dfce; border-radius: 10px; background: #fcfdf8; box-shadow: 0 8px 30px #173e3326; }
 .unified-toolbar .stylus-binding-trigger { min-height: 48px; }
