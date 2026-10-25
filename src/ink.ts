@@ -1,5 +1,4 @@
 import type { Point, Stroke } from './types';
-import { pressureOutline } from '../shared/pressure.mjs';
 
 // Coordinates are normalized to the actual slide, never to the letterbox.
 export function snapLine(start: Point, end: Point, aspect: number, enabled = true): Point {
@@ -30,67 +29,3 @@ export function hitStrokes(strokes: Stroke[], point: Point, previous: Point | nu
   })).map(s => s.id);
 }
 
-export function drawInk(canvas: HTMLCanvasElement, strokes: Stroke[]) {
-  const ctx = canvas.getContext('2d'); if (!ctx) return;
-  ctx.clearRect(0, 0, canvas.width, canvas.height);
-  paintStrokes(ctx, strokes, canvas.width, canvas.height);
-}
-
-function paintStrokes(ctx: CanvasRenderingContext2D, strokes: Stroke[], width: number, height: number) {
-  ctx.lineCap = 'round'; ctx.lineJoin = 'round';
-  for (const stroke of strokes) {
-    if (!stroke.points.length) continue;
-    ctx.strokeStyle = stroke.color;
-    ctx.fillStyle = stroke.color;
-    ctx.globalAlpha = stroke.tool === 'highlighter' ? .3 : 1;
-    const outline = pressureOutline(stroke, width / height);
-    if (outline?.length) {
-      ctx.beginPath();
-      outline.forEach((p, i) => { if (i === 0) ctx.moveTo(p.x * width, p.y * height); else ctx.lineTo(p.x * width, p.y * height); });
-      ctx.closePath(); ctx.fill(); continue;
-    }
-    ctx.lineWidth = stroke.width / 1600 * width;
-    ctx.beginPath();
-    const first = stroke.points[0];
-    ctx.moveTo(first.x * width, first.y * height);
-    for (let i = 1; i < stroke.points.length; i++) ctx.lineTo(stroke.points[i].x * width, stroke.points[i].y * height);
-    if (stroke.points.length === 1) { ctx.arc(first.x * width, first.y * height, ctx.lineWidth / 2, 0, Math.PI * 2); ctx.fill(); }
-    else ctx.stroke();
-  }
-  ctx.globalAlpha = 1;
-}
-
-// Keep finished ink in a bitmap. During writing only the newest stroke needs
-// its geometry rebuilt; older pressure outlines must not run on every move.
-export class InkRenderer {
-  private base: HTMLCanvasElement;
-  private cached: Stroke[] = [];
-  private width = 0;
-  private height = 0;
-  constructor(base: HTMLCanvasElement) { this.base = base; }
-  render(canvas: HTMLCanvasElement, strokes: Stroke[]) {
-    const stable = strokes.slice(0, -1);
-    const resized = this.width !== canvas.width || this.height !== canvas.height;
-    const reusable = !resized && this.cached.length <= stable.length && this.cached.every((stroke, i) => stroke === stable[i]);
-    if (!reusable) {
-      this.base.width = canvas.width; this.base.height = canvas.height;
-      this.cached = [];
-    }
-    const added = stable.slice(this.cached.length);
-    // drawInk clears the target, so append through a context without clearing.
-    if (added.length) {
-      const ctx = this.base.getContext('2d');
-      if (ctx) paintStrokes(ctx, added, canvas.width, canvas.height);
-    }
-    this.cached = stable; this.width = canvas.width; this.height = canvas.height;
-    const ctx = canvas.getContext('2d'); if (!ctx) return;
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
-    if (stable.length) ctx.drawImage(this.base, 0, 0);
-    if (strokes.length) paintStrokes(ctx, [strokes[strokes.length - 1]], canvas.width, canvas.height);
-  }
-}
-
-export function inkBitmapSize(width: number, height: number, scale: number) {
-  const density = Math.min(scale, 4, 4096 / width, 4096 / height, Math.sqrt(3_000_000 / (width * height)));
-  return { width: Math.max(1, Math.round(width * density)), height: Math.max(1, Math.round(height * density)) };
-}

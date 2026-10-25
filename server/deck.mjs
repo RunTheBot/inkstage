@@ -1,7 +1,7 @@
 import JSZip from 'jszip';
 import { XMLParser } from 'fast-xml-parser';
 import path from 'node:path';
-import { readFile, mkdir } from 'node:fs/promises';
+import { readFile, mkdir, stat, rename } from 'node:fs/promises';
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { pressureOutline } from '../shared/pressure.mjs';
@@ -76,7 +76,8 @@ export async function inspectDeck(buffer) {
 }
 
 let conversion = Promise.resolve();
-export function renderDeck(input, output) {
+export function renderDeck(input, output, pdfOnly = false) {
+  input = path.resolve(input); output = path.resolve(output);
   const operation = conversion.then(async () => {
     if (process.platform !== 'win32') throw new Error('PPTX import currently requires Windows with desktop Microsoft PowerPoint installed.');
     await mkdir(output, { recursive: true });
@@ -84,7 +85,7 @@ export function renderDeck(input, output) {
     await new Promise((resolve, reject) => {
       const child = spawn('powershell.exe', ['-NoLogo', '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', script], {
         windowsHide: true,
-        env: { ...process.env, INKSTAGE_INPUT: input, INKSTAGE_OUTPUT: output },
+        env: { ...process.env, INKSTAGE_INPUT: input, INKSTAGE_OUTPUT: output, INKSTAGE_PDF_ONLY: pdfOnly ? '1' : '0' },
         stdio: ['ignore', 'pipe', 'pipe'],
       });
       let stderr = '';
@@ -93,9 +94,24 @@ export function renderDeck(input, output) {
       child.on('error', error => { clearTimeout(timeout); reject(error); });
       child.on('exit', code => { clearTimeout(timeout); code === 0 ? resolve() : reject(new Error(`PowerPoint could not render this file. Check that PowerPoint is activated and the file opens normally. ${stderr.slice(0, 600)}`)); });
     });
+    await rename(path.join(output, 'deck.pending.pdf'), path.join(output, 'deck.pdf'));
   });
   conversion = operation.catch(() => {});
   return operation;
+}
+
+const pdfJobs = new Map();
+export async function ensurePDF(directory) {
+  const output = path.join(directory, 'slides');
+  const target = path.join(output, 'deck.pdf');
+  if (pdfJobs.has(target)) { await pdfJobs.get(target); return target; }
+  try { if ((await stat(target)).size > 8) return target; } catch { /* Upgrade an existing session. */ }
+  if (!pdfJobs.has(target)) {
+    const job = renderDeck(path.join(directory, 'original.pptx'), output, true).finally(() => pdfJobs.delete(target));
+    pdfJobs.set(target, job);
+  }
+  await pdfJobs.get(target);
+  return target;
 }
 
 // Add ordinary editable DrawingML freeform shapes to the original package.

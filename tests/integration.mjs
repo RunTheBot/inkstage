@@ -6,9 +6,12 @@ import path from 'node:path';
 import JSZip from 'jszip';
 import { demoDeck } from '../server/demo.mjs';
 import { inspectDeck, renderDeck } from '../server/deck.mjs';
+import { getDocument, OPS } from 'pdfjs-dist/legacy/build/pdf.mjs';
 
 const origin = process.env.INKSTAGE_TEST_URL ?? 'http://localhost:4173';
-const original = await demoDeck();
+const fixture = await JSZip.loadAsync(await demoDeck());
+fixture.file('ppt/slides/slide2.xml', (await fixture.file('ppt/slides/slide2.xml').async('string')).replace(/<p:sld\b/, '<p:sld show="0"'));
+const original = await fixture.generateAsync({ type: 'nodebuffer' });
 const form = new FormData(); form.append('deck', new Blob([original]), 'Integration test.pptx');
 console.log('Importing a real PPTX through the upload endpoint and PowerPoint renderer…');
 const imported = await fetch(`${origin}/api/sessions`, { method: 'POST', body: form });
@@ -20,6 +23,21 @@ assert.equal((await fetch(`${origin}/api/sessions/${credential.id}`)).status, 40
 const links = await (await fetch(`${origin}/api/sessions/${credential.id}/links`, { headers: auth })).json();
 const image = await fetch(`${origin}/api/sessions/${credential.id}/slides/slide-1.png?role=audience&token=${links.tokens.audience}`);
 assert.equal(image.status, 200); assert.equal(image.headers.get('content-type'), 'image/png');
+assert.equal((await fetch(`${origin}/api/sessions/${credential.id}/slides.pdf`)).status, 403);
+const vectorResponse = await fetch(`${origin}/api/sessions/${credential.id}/slides.pdf`, { headers: { Authorization: `Bearer ${links.tokens.audience}`, 'X-Inkstage-Role': 'audience' } });
+assert.equal(vectorResponse.status, 200); assert.equal(vectorResponse.headers.get('content-type'), 'application/pdf');
+const pdf = await getDocument({ data: new Uint8Array(await vectorResponse.arrayBuffer()) }).promise;
+assert.equal(pdf.numPages, 4, 'PDF must retain hidden slides so page indices match the deck');
+let fullText = '';
+for (let i = 1; i <= pdf.numPages; i++) {
+  const page = await pdf.getPage(i), text = await page.getTextContent(), operators = await page.getOperatorList();
+  assert.ok(text.items.length > 0, 'Slide text must remain text, not a full-page bitmap');
+  assert.ok(operators.fnArray.includes(OPS.constructPath), 'Slide drawings must retain vector paths');
+  fullText += text.items.map(item => item.str ?? '').join(' ');
+}
+for (const slide of state.slides) if (slide.notes) assert.ok(!fullText.includes(slide.notes), 'Audience PDF must not include speaker notes');
+await pdf.loadingTask.destroy();
+console.log('PDF: vector text and drawings preserved; hidden slide order and notes privacy verified.');
 const clients = [];
 async function connect(role) {
   const ws = new WebSocket(`${origin.replace('http', 'ws')}/ws?session=${credential.id}&role=${role}&token=${links.tokens[role]}`);

@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { defaultStylusBinding, hasDrawingContact, isEraserSignal, learnStylusBinding, StylusEraser, tipOnlySignal, validBinding } from '../src/stylus.ts';
+import { defaultStylusBinding, hasDrawingContact, isEraserSignal, learnStylusBinding, loadStylusBinding, StylusEraser, tipOnlySignal, validBinding } from '../src/stylus.ts';
 
 test('automatic erasing responds to side-button presses and releases during an existing stroke', () => {
   const eraser = new StylusEraser(defaultStylusBinding);
@@ -57,4 +57,56 @@ test('tip-only streams remain ordinary writing and cannot be learned as a side b
   assert.equal(tipOnlySignal(stream[0]), true);
   assert.equal(tipOnlySignal({ pointerType: 'mouse', button: 0, buttons: 1 }), true);
   assert.equal(tipOnlySignal({ pointerType: 'pen', button: 2, buttons: 3 }), false);
+});
+
+const samsung = { kind: 's-pen', mask: 0, device: 'pen', behavior: 'hold' };
+const penEvent = (type, button, buttons = 1) => ({ type, pointerType: 'pen', button, buttons });
+
+test('Samsung mode ignores ordinary tip-down and normal movement', () => {
+  const eraser = new StylusEraser(samsung);
+  for (const signal of [penEvent('pointerdown', 0), penEvent('pointermove', -1), penEvent('pointermove', -1), penEvent('pointerup', 0, 0)]) assert.equal(eraser.update(signal), false);
+  assert.equal(isEraserSignal(samsung, { pointerType: 'pen', button: 0, buttons: 1 }), false, 'an unknown event type cannot activate the compatibility preset');
+});
+
+test('Samsung hold mode erases on button-0 contact moves and restores drawing on button-minus-1 moves', () => {
+  const eraser = new StylusEraser(samsung);
+  assert.equal(eraser.update(penEvent('pointerdown', 0)), false);
+  assert.equal(eraser.update(penEvent('pointermove', -1)), false);
+  assert.equal(eraser.update(penEvent('pointermove', 0)), true);
+  assert.equal(eraser.update(penEvent('pointermove', 0)), true);
+  assert.equal(eraser.update(penEvent('pointermove', -1)), false);
+  assert.equal(eraser.update(penEvent('pointermove', 0)), true);
+  assert.equal(eraser.update(penEvent('pointerup', 0, 0)), false);
+  assert.equal(eraser.update(penEvent('pointerdown', 0)), false);
+});
+
+test('Samsung compatibility does not interpret hover, mouse, finger or canceled contact as erasing', () => {
+  for (const signal of [penEvent('pointermove', 0, 0), penEvent('pointercancel', 0), { ...penEvent('pointermove', 0), pointerType: 'mouse' }, { ...penEvent('pointermove', 0), pointerType: 'touch' }]) assert.equal(isEraserSignal(samsung, signal), false);
+  const eraser = new StylusEraser(samsung);
+  eraser.update(penEvent('pointermove', 0));
+  assert.equal(eraser.update(penEvent('pointercancel', 0)), false);
+  eraser.update(penEvent('pointermove', 0)); eraser.reset();
+  assert.equal(eraser.erasing, false);
+});
+
+test('Samsung toggle mode changes once per reported press and ignores ordinary tip-down', () => {
+  const eraser = new StylusEraser({ ...samsung, behavior: 'toggle' });
+  assert.equal(eraser.update(penEvent('pointerdown', 0)), false);
+  assert.equal(eraser.update(penEvent('pointermove', 0)), true);
+  assert.equal(eraser.update(penEvent('pointermove', 0)), true);
+  assert.equal(eraser.update(penEvent('pointermove', -1)), true);
+  assert.equal(eraser.update(penEvent('pointermove', 0)), false);
+});
+
+test('Samsung compatibility is persisted only as an explicit valid pen binding', () => {
+  assert.equal(validBinding(samsung), true);
+  assert.equal(validBinding({ ...samsung, device: 'mouse' }), false);
+  assert.equal(validBinding({ ...samsung, mask: 1 }), false);
+  const previous = globalThis.localStorage;
+  try {
+    globalThis.localStorage = { getItem: key => key === 'inkstage-stylus-button' ? JSON.stringify(samsung) : null };
+    assert.deepEqual(loadStylusBinding(), samsung);
+  } finally { if (previous === undefined) delete globalThis.localStorage; else globalThis.localStorage = previous; }
+  assert.equal(isEraserSignal(defaultStylusBinding, penEvent('pointermove', 0)), false);
+  assert.equal(learnStylusBinding(penEvent('pointermove', 0), 'hold'), null);
 });

@@ -8,8 +8,12 @@ export function fitSlide(size: Size, aspect: number): Size {
 }
 export function constrainView(view: View, viewport: Size, slide: Size): View {
   const scale = Math.max(.5, Math.min(6, view.scale));
-  const maxX = Math.max(0, (slide.width * scale - viewport.width) / 2);
-  const maxY = Math.max(0, (slide.height * scale - viewport.height) / 2);
+  // Keep a full half-page of pan room at fit size too, so hand mode can
+  // reposition the slide without requiring a zoom first.
+  const marginX = scale >= 1 ? Math.min(viewport.width, slide.width * scale) / 2 : 0;
+  const marginY = scale >= 1 ? Math.min(viewport.height, slide.height * scale) / 2 : 0;
+  const maxX = Math.max(0, (slide.width * scale - viewport.width) / 2) + marginX;
+  const maxY = Math.max(0, (slide.height * scale - viewport.height) / 2) + marginY;
   return { scale, x: Math.max(-maxX, Math.min(maxX, view.x)), y: Math.max(-maxY, Math.min(maxY, view.y)) };
 }
 // Anchor is measured in viewport pixels from its center. Preserve the slide

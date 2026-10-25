@@ -1,0 +1,83 @@
+/* Both writable views use these same dimensions, groups and menus. */
+.unified-toolbar {
+  --tool-size: 44px;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 6px;
+  max-width: 1280px;
+  margin: 0 auto;
+  padding: 4px;
+  border: 1px solid #d6dfce;
+  border-radius: 10px;
+  background: #fcfdf8f2;
+  box-shadow: 0 3px 16px #173e3314;
+  pointer-events: auto;
+}
+.unified-toolbar .ink-toolbar,
+.unified-toolbar .toolbar-group,
+.unified-toolbar .pen-control,
+.unified-toolbar .slide-navigation,
+.unified-toolbar .view-tools,
+.unified-toolbar .viewport-controls,
+.unified-toolbar .viewport-tools-slot {
+  display: flex;
+  align-items: center;
+}
+.unified-toolbar .ink-toolbar { justify-content: center; flex-wrap: wrap; gap: 2px; min-width: 0; }
+.unified-toolbar .toolbar-group { gap: 0; }
+.unified-toolbar .pen-control { position: relative; gap: 0; }
+.unified-toolbar .view-tools, .unified-toolbar .viewport-controls { gap: 2px; }
+.unified-toolbar .viewport-controls { position: relative; touch-action: manipulation; }
+.unified-toolbar .icon-button,
+.unified-toolbar .pen-menu-arrow,
+.unified-toolbar .viewport-controls > button,
+.unified-toolbar .color-choice {
+  width: var(--tool-size);
+  min-width: var(--tool-size);
+  height: var(--tool-size);
+  flex: 0 0 var(--tool-size);
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  color: #6f8661;
+  touch-action: manipulation;
+}
+.unified-toolbar .icon-button > svg,
+.unified-toolbar .viewport-controls > button:not(.zoom-menu-button) > svg { width: 22px; height: 22px; }
+.unified-toolbar .pen-menu-arrow > svg { width: 17px; height: 17px; }
+.unified-toolbar .icon-button.active,
+.unified-toolbar .pen-menu-arrow.selected,
+.unified-toolbar .viewport-controls > button.selected { background: #173e33; color: #d5f291; }
+.unified-toolbar .slide-navigation { gap: 7px; }
+.unified-toolbar .slide-navigation > span { font-size: 11px; letter-spacing: .5px; color: #617955; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.unified-toolbar .slide-navigation i { font-style: normal; margin: 0 5px; color: #aab89e; }
+.unified-toolbar .toolbar-divider { width: 1px; height: 22px; flex: 0 0 1px; background: #e0e6d7; margin: 0 2px; }
+.unified-toolbar .color-choice { position: relative; display: grid; place-items: center; }
+.unified-toolbar .color-choice > span { width: 22px; height: 22px; border: 1px solid #00000018; border-radius: 50%; background: var(--swatch); }
+.unified-toolbar .color-choice.selected > span { box-shadow: 0 0 0 3px #fcfdf8, 0 0 0 4px var(--swatch); }
+.unified-toolbar .color-choice > svg { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); }
+.unified-toolbar .viewport-controls > .zoom-menu-button { width: 80px; min-width: 80px; flex-basis: 80px; gap: 5px; font-size: 11px; font-variant-numeric: tabular-nums; }
+.unified-toolbar :is(.pen-settings, .pen-submenu, .view-submenu) { bottom: calc(100% + 12px); padding: 18px; border: 1px solid #d6dfce; border-radius: 10px; background: #fcfdf8; box-shadow: 0 8px 30px #173e3326; }
+.unified-toolbar .stylus-binding-trigger { min-height: 48px; }
+.presenter-tools { display: flex; align-items: center; gap: 2px; }
+
+@media (hover: hover) and (pointer: fine) {
+  .unified-toolbar .icon-button:hover:not(:disabled),
+  .unified-toolbar .pen-menu-arrow:hover,
+  .unified-toolbar .viewport-controls > button:hover:not(:disabled),
+  .unified-toolbar .color-choice:hover { background: #e7efdd; color: #173e33; }
+}
+
+@container (max-width: 1140px) {
+  .unified-toolbar { grid-template-columns: 1fr auto; gap: 6px; }
+  .unified-toolbar > .slide-navigation { grid-column: 1; grid-row: 1; }
+  .unified-toolbar > .view-tools { grid-column: 2; grid-row: 1; }
+  .unified-toolbar > .ink-toolbar { grid-column: 1 / -1; grid-row: 2; padding-top: 5px; border-top: 1px solid #e5eadf; }
+}
+@container (max-width: 370px) {
+  .unified-toolbar .toolbar-group { flex-wrap: wrap; justify-content: center; }
+  .unified-toolbar .toolbar-divider { display: none; }
+  .unified-toolbar .slide-navigation { gap: 3px; }
+  .unified-toolbar .slide-navigation i { margin: 0 3px; }
+}

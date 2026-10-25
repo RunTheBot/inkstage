@@ -1,7 +1,7 @@
 $ErrorActionPreference = 'Stop'
 Set-Location -LiteralPath $PSScriptRoot
 if (-not (Get-Command node -ErrorAction SilentlyContinue)) {
-    Write-Host 'Install Node.js 22.12+ or 24 LTS, then run this script again.'
+    Write-Host 'Install Node.js 22.13+ or 24 LTS, then run this script again.'
     exit 1
 }
 if (-not (Test-Path -LiteralPath (Join-Path $PSScriptRoot 'node_modules'))) {

@@ -1,10 +1,14 @@
 export type StylusBinding = {
-  kind: 'auto' | 'pointer' | 'disabled';
+  kind: 'auto' | 'pointer' | 's-pen' | 'disabled';
   mask: number;
   device: 'pen' | 'mouse' | 'any';
   behavior: 'hold' | 'toggle';
 };
-export type StylusSignal = { pointerType: string; buttons: number; button?: number; pressure?: number };
+export type StylusSignal = { type?: string; pointerType: string; buttons: number; button?: number; pressure?: number; native?: boolean };
+export function pointerSignal(event: StylusSignal & { nativeEvent?: unknown }): StylusSignal {
+  const source = event.nativeEvent as { inkstageNative?: boolean } | undefined;
+  return { type: event.type, pointerType: event.pointerType, buttons: event.buttons, button: event.button, pressure: event.pressure, native: !!source?.inkstageNative };
+}
 export function tipOnlySignal(signal: StylusSignal) {
   return ['pen', 'mouse'].includes(signal.pointerType) && signal.buttons === 1 && (signal.button === 0 || signal.button === -1);
 }
@@ -19,13 +23,15 @@ export const stylusPresets = [
   { id: 'back', label: 'Back / X1 button', kind: 'pointer', mask: 8 },
   { id: 'forward', label: 'Forward / X2 button', kind: 'pointer', mask: 16 },
   { id: 'tail', label: 'Eraser tip', kind: 'pointer', mask: 32 },
+  { id: 's-pen', label: 'Samsung S Pen / Android (experimental)', kind: 's-pen', mask: 0 },
   { id: 'disabled', label: 'Disabled', kind: 'disabled', mask: 0 },
 ] as const;
 export function validBinding(value: unknown): value is StylusBinding {
   if (!value || typeof value !== 'object') return false;
   const b = value as StylusBinding;
-  return ['auto', 'pointer', 'disabled'].includes(b.kind) && ['pen', 'mouse', 'any'].includes(b.device) && ['hold', 'toggle'].includes(b.behavior)
-    && Number.isInteger(b.mask) && b.mask >= 0 && b.mask <= 254 && !(b.mask & 1) && (b.kind !== 'pointer' || b.mask > 0);
+  return ['auto', 'pointer', 's-pen', 'disabled'].includes(b.kind) && ['pen', 'mouse', 'any'].includes(b.device) && ['hold', 'toggle'].includes(b.behavior)
+    && Number.isInteger(b.mask) && b.mask >= 0 && b.mask <= 254 && !(b.mask & 1) && (b.kind !== 'pointer' || b.mask > 0)
+    && (b.kind !== 's-pen' || (b.mask === 0 && b.device === 'pen'));
 }
 export function loadStylusBinding(): StylusBinding {
   try { const saved = JSON.parse(localStorage.getItem('inkstage-stylus-button') ?? 'null'); if (validBinding(saved)) return saved; } catch { /* Use the defaults for older or unavailable storage. */ }
@@ -36,6 +42,10 @@ export function bindingLabel(binding: StylusBinding) {
 }
 export function isEraserSignal(binding: StylusBinding, signal: StylusSignal) {
   if (binding.kind === 'disabled' || !['pen', 'mouse'].includes(signal.pointerType) || (binding.device !== 'any' && binding.device !== signal.pointerType)) return false;
+  // Opt-in compatibility with devices that report 0 on barrel-held moves and
+  // -1 on normal moves, while keeping buttons=1. A normal tip-down also uses
+  // button=0, so only a pointermove can activate this experimental binding.
+  if (binding.kind === 's-pen') return signal.native ? !!(signal.buttons & 34) : signal.pointerType === 'pen' && signal.type === 'pointermove' && signal.button === 0 && signal.buttons === 1;
   return binding.kind === 'auto' ? !!(signal.buttons & 34) : (signal.buttons & binding.mask) === binding.mask;
 }
 export function learnStylusBinding(signal: StylusSignal, behavior: StylusBinding['behavior']): StylusBinding | null {

@@ -3,3 +3,9 @@ dist/
 .data/
 *.log
 tsconfig.tsbuildinfo
+
+/public/pdfjs/
+/android/.gradle/
+/android/build/
+/android/app/build/
+/android/local.properties

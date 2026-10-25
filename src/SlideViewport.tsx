@@ -36,8 +36,8 @@ export function SlideViewport({ controlsTarget, ...props }: Props) {
   useEffect(() => {
     const outside = (e: globalThis.PointerEvent) => { if (!menu.current?.contains(e.target as Node)) setOptions(false); };
     const escape = (e: KeyboardEvent) => { if (e.key === 'Escape') setOptions(false); };
-    document.addEventListener('pointerdown', outside); document.addEventListener('keydown', escape);
-    return () => { document.removeEventListener('pointerdown', outside); document.removeEventListener('keydown', escape); };
+    document.addEventListener('pointerdown', outside, true); document.addEventListener('keydown', escape);
+    return () => { document.removeEventListener('pointerdown', outside, true); document.removeEventListener('keydown', escape); };
   }, []);
   useEffect(() => { apply(current.current); }, [size.width, size.height]);
   useEffect(() => {
@@ -130,8 +130,8 @@ export function SlideViewport({ controlsTarget, ...props }: Props) {
   return <div ref={host} className={`slide-viewport ${hand ? 'hand-mode' : ''} ${dragging ? 'is-panning' : ''}`}
     onPointerDownCapture={down} onPointerMoveCapture={move} onPointerUpCapture={up} onPointerCancelCapture={up}
     onLostPointerCapture={e => { if (e.target === e.currentTarget) up(e); }}>
-    <div className="slide-fit" style={{ width: slide.width, height: slide.height, transform: `translate(-50%, -50%) translate(${view.x}px, ${view.y}px) scale(${view.scale})` }}>
-      <SlideCanvas {...props} inputRef={input} renderScale={view.scale} interactive={props.interactive && !hand} />
+    <div className="slide-fit" style={{ width: slide.width * view.scale, height: slide.height * view.scale, transform: `translate(-50%, -50%) translate(${view.x}px, ${view.y}px)` }}>
+      <SlideCanvas {...props} inputRef={input} renderScale={view.scale} renderX={view.x} renderY={view.y} interactive={props.interactive && !hand} />
     </div>
     {controlsTarget && createPortal(<div className="viewport-controls" aria-label="Slide zoom and pan" ref={menu}>
       <button aria-label="Pan mode (M)" title="Pan mode (M): drag to move the slide" aria-pressed={hand} className={hand ? 'selected' : ''} onClick={() => setHand(!hand)}><Hand size={17} /></button>

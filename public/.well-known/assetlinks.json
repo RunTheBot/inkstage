@@ -1,0 +1,10 @@
+[
+  {
+    "relation": ["delegate_permission/common.handle_all_urls"],
+    "target": {
+      "namespace": "android_app",
+      "package_name": "com.inkstage.pen",
+      "sha256_cert_fingerprints": ["DF:1A:37:EF:5F:45:B3:33:CE:E1:FD:A0:3C:79:C0:C0:8F:69:BB:CA:B0:78:B7:C6:EC:F9:DF:46:8A:62:A1:69"]
+    }
+  }
+]

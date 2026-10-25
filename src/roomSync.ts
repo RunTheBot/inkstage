@@ -10,7 +10,7 @@ export function updateRoom(room: Room, event: Operation): Room {
       strokes = { ...strokes, [slide]: [...ink, event.stroke as Stroke] }; break;
     case 'stroke-cancel': strokes = { ...strokes, [slide]: ink.filter(s => s.id !== event.id) }; break;
     case 'stroke-points':
-    case 'stroke-replace': strokes = { ...strokes, [slide]: ink.map(s => s.id === event.id ? { ...s, points: event.type === 'stroke-replace' ? event.points as Point[] : [...s.points, ...event.points as Point[]] } : s) }; break;
+    case 'stroke-replace': strokes = { ...strokes, [slide]: ink.map(s => s.id === event.id ? { ...s, ...(event.type === 'stroke-replace' && typeof event.sensitivity === 'number' ? { sensitivity: event.sensitivity } : {}), points: event.type === 'stroke-replace' ? event.points as Point[] : [...s.points, ...event.points as Point[]] } : s) }; break;
     case 'ink-state': strokes = { ...strokes, [slide]: event.strokes as Stroke[] }; break;
     case 'erase': strokes = { ...strokes, [slide]: ink.filter(s => !(event.ids as string[]).includes(s.id)) }; break;
     case 'controls': return { ...room, current: event.current as number, blackout: event.blackout as boolean, timer: event.timer as Room['timer'], revision: event.revision as number };

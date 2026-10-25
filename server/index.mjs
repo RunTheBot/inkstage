@@ -7,7 +7,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { mkdir, readFile, writeFile, rename, readdir, rm } from 'node:fs/promises';
 import { randomBytes, timingSafeEqual } from 'node:crypto';
-import { inspectDeck, renderDeck, exportDeck, readOriginal } from './deck.mjs';
+import { inspectDeck, renderDeck, ensurePDF, exportDeck, readOriginal } from './deck.mjs';
 import { demoDeck } from './demo.mjs';
 import { token, publicState, applyOperation } from './state.mjs';
 import { enforceSameOrigin } from './origin.mjs';
@@ -44,6 +44,8 @@ for (const entry of await readdir(dataRoot, { withFileTypes: true })) {
 const app = express();
 app.disable('x-powered-by');
 enforceSameOrigin(app);
+// Serve the exact public association file; general dotfiles stay inaccessible.
+app.get('/.well-known/assetlinks.json', (_req, res) => res.sendFile(path.join(root, 'public', '.well-known', 'assetlinks.json'), { dotfiles: 'allow' }));
 app.use(express.json({ limit: '128kb' }));
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 80 * 1024 * 1024, files: 1 } });
 function auth(room, role, value) {
@@ -98,6 +100,11 @@ app.post('/api/sessions', upload.single('deck'), async (req, res) => {
 app.post('/api/sessions/demo', async (_req, res) => res.status(201).json(await createSession(await demoDeck(), 'Room to think.pptx')));
 app.get('/api/sessions/:id', protect(allRoles), (req, res) => res.json(publicState(req.room, req.role)));
 app.get('/api/sessions/:id/links', protect(['presenter']), (req, res) => res.json({ tokens: req.room.tokens }));
+app.get('/api/sessions/:id/slides.pdf', protect(allRoles), async (req, res) => {
+  const pdf = await ensurePDF(path.join(dataRoot, req.room.id));
+  res.setHeader('Cache-Control', 'private, max-age=86400');
+  res.type('application/pdf').sendFile(pdf, { dotfiles: 'allow' });
+});
 // Image requests use role-specific tokens since HTML img cannot send auth headers.
 app.get('/api/sessions/:id/slides/:image', (req, res) => {
   const room = rooms.get(req.params.id);

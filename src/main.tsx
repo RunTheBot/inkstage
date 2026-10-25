@@ -8,10 +8,17 @@ import { SlideViewport } from './SlideViewport';
 import { smoothingPresets, type SmoothingPreset } from './smoothing';
 import { StylusButtonSettings } from './StylusButtonSettings';
 import { loadStylusBinding, type StylusBinding } from './stylus';
+import { connectionAddress } from './connectionAddress';
+import { penLaunchLinks } from './androidLink';
 import { type Credentials, type Role, type Tool, type Room, type Operation, headers, sessionURL } from './types';
 import './style.css';
+import './toolbar.css';
+import './render.css';
 
 const colors = ['#e4594e', '#f3b64b', '#4077d1', '#7c5bc5', '#294e3e', '#ffffff'];
+// The Android activity owns fullscreen; WebView does not expose browser
+// fullscreen controls and is already immersive before this page renders.
+const nativePenClient = /\bInkstageNativePen\//.test(navigator.userAgent);
 const tools: { key: Tool; label: string; shortcut: string; icon: typeof PenLine }[] = [
   { key: 'pen', label: 'Pen', shortcut: 'P', icon: PenLine },
   { key: 'highlighter', label: 'Highlighter', shortcut: 'H', icon: Highlighter },
@@ -88,7 +95,7 @@ function Welcome({ onOpen }: { onOpen: (c: Credentials) => void }) {
 
 function HelpModal({ close }: { close: () => void }) {
   return <Modal title="A little setup. A lot more room." subtitle="Keep the server running on your laptop while you present." close={close}>
-    <ol className="setup-steps"><li><strong>Open your PowerPoint</strong><p>Import a .pptx. The app uses desktop PowerPoint on Windows to render each slide and read its speaker notes.</p></li><li><strong>Give each screen its own view</strong><p>Open the audience window on your projector. Connect the tablet with the link or QR code in “Connect devices”. The laptop keeps the presenter view.</p></li><li><strong>Write naturally</strong><p>Pause for 0.55 seconds at the end of a pen stroke to straighten it. Lines snap near horizontal, vertical, and 45°. The eraser removes a whole stroke. Your stylus side or eraser button can erase too.</p></li><li><strong>Keep your annotations</strong><p>Export an annotated .pptx. The original content stays editable and ink becomes editable freeform shapes. The presentation uses static slides, so animations and videos do not play here.</p></li></ol>
+    <ol className="setup-steps"><li><strong>Open your PowerPoint</strong><p>Import a .pptx. The app uses desktop PowerPoint on Windows to render each slide and read its speaker notes.</p></li><li><strong>Give each screen its own view</strong><p>Open the audience window on your projector. Connect the tablet with the link or QR code in “Connect devices”. The laptop keeps the presenter view.</p></li><li><strong>Write naturally</strong><p>Pause for 0.55 seconds at the end of a pen or highlighter stroke to straighten it. Lines snap near horizontal, vertical, and 45°. The eraser removes a whole stroke. Your stylus side or eraser button can erase too.</p></li><li><strong>Keep your annotations</strong><p>Export an annotated .pptx. The original content stays editable and ink becomes editable freeform shapes. The presentation uses static slides, so animations and videos do not play here.</p></li></ol>
     <div className="shortcut-box"><span><kbd>←</kbd><kbd>→</kbd> Slides</span><span><kbd>P</kbd> Pen</span><span><kbd>E</kbd> Erase</span><span><kbd>L</kbd> Line</span><span><kbd>B</kbd> Blackout</span><span><kbd>F</kbd> Fullscreen</span><span><kbd>Ctrl</kbd><kbd>Z</kbd> Undo</span></div>
   </Modal>;
 }
@@ -101,43 +108,65 @@ function Modal({ title, subtitle, children, close }: { title: string; subtitle?:
 function Devices({ credentials, counts, close }: { credentials: Credentials; counts: { pen: number; audience: number }; close: () => void }) {
   const [tokens, setTokens] = useState<Record<Role, string> | null>(null), [addresses, setAddresses] = useState<string[]>([]), [base, setBase] = useState(location.origin), [error, setError] = useState(''), [copied, setCopied] = useState('');
   const [role, setRole] = useState<'pen' | 'audience'>('pen');
+  const [customAddress, setCustomAddress] = useState(() => {
+    try { return localStorage.getItem('inkstage-custom-address') ?? ''; } catch { return ''; }
+  });
+  const custom = connectionAddress(customAddress);
+  const selectedAddress = base === 'custom' ? custom.origin : base;
   useEffect(() => {
-    void Promise.all([fetch(`/api/sessions/${credentials.id}/links`, { headers: headers(credentials) }).then(jsonResponse), fetch('/api/network').then(jsonResponse)])
+    void Promise.all([fetch(`/api/sessions/${credentials.id}/links`, { headers: headers(credentials) }).then(jsonResponse), fetch('/api/network').then(jsonResponse).catch(() => ({ addresses: [] }))])
       .then(([links, network]) => { setTokens(links.tokens); const choices = Array.from(new Set<string>(location.protocol === 'https:' ? [location.origin, ...network.addresses] : [...network.addresses, location.origin])); setAddresses(choices); setBase(choices[0] ?? location.origin); }).catch(e => setError(e.message));
   }, [credentials]);
-  const link = tokens ? sessionURL({ ...credentials, role, token: tokens[role] }, base) : '';
+  const link = tokens && selectedAddress ? sessionURL({ ...credentials, role, token: tokens[role] }, selectedAddress) : '';
+  const qrLink = link && role === 'pen' ? penLaunchLinks(link).qr : link;
+  useEffect(() => {
+    if (base === 'custom') {
+      try {
+        if (custom.origin) localStorage.setItem('inkstage-custom-address', custom.origin);
+        else if (!customAddress.trim()) localStorage.removeItem('inkstage-custom-address');
+      } catch { /* The field still works without storage. */ }
+    }
+  }, [base, custom.origin, customAddress]);
+  useEffect(() => { setCopied(''); }, [link]);
   async function copy() {
     try { await navigator.clipboard.writeText(link); setCopied(role); setTimeout(() => setCopied(''), 2000); }
     catch { setError('Clipboard access is unavailable. Select and copy the link below.'); }
   }
-  return <Modal title="Give every screen its place." subtitle="Open the matching view on each device. Keep all devices on the same network." close={close}>
+  return <Modal title="Give every screen its place." subtitle="Open the matching view on each device. Choose a server address each device can reach." close={close}>
     <div className="device-tabs"><button className={role === 'pen' ? 'selected' : ''} onClick={() => setRole('pen')}><Tablet size={19} /> Tablet pen view <span>{counts.pen ? 'Connected' : 'Not connected'}</span></button><button className={role === 'audience' ? 'selected' : ''} onClick={() => setRole('audience')}><Monitor size={19} /> Audience view <span>{counts.audience ? 'Connected' : 'Not connected'}</span></button></div>
-    {tokens ? <><div className="qr-area"><div className="qr-code"><QRCodeSVG value={link} size={170} bgColor="#ffffff" fgColor="#173e33" level="M" /></div><div><span className="eyebrow">{role === 'pen' ? 'SCAN ON YOUR TABLET' : 'OPEN ON THE AUDIENCE SCREEN'}</span><h3>{role === 'pen' ? 'Your slide. Full size.' : 'Just the presentation.'}</h3><p>{role === 'pen' ? 'Open the camera on your Android tablet and scan this code. Pen controls stay on the tablet.' : 'Open this view in a new window, move it to the projector, and press F for fullscreen.'}</p><button className="secondary-button" onClick={() => window.open(sessionURL({ ...credentials, role, token: tokens[role] }), '_blank', 'noopener,noreferrer')}>Open {role === 'pen' ? 'pen' : 'audience'} view <MoveUpRight size={16} /></button></div></div>
-      <label className="field-label" htmlFor="network-address">Laptop network address</label><select id="network-address" value={base} onChange={e => setBase(e.target.value)}>{addresses.map(a => <option key={a}>{a}</option>)}</select>
-      <div className="copy-field"><input aria-label={`${role} session link`} readOnly value={link} onFocus={e => e.target.select()} /><IconButton label="Copy link" onClick={() => void copy()}>{copied === role ? <Check size={19} /> : <Copy size={19} />}</IconButton></div>
+    {tokens ? <><div className="qr-area"><div className="qr-code">{link ? <QRCodeSVG value={qrLink} size={170} bgColor="#ffffff" fgColor="#173e33" level="M" /> : <span className="qr-placeholder">Enter a valid address to generate the QR code.</span>}</div><div><span className="eyebrow">{role === 'pen' ? 'SCAN ON YOUR TABLET' : 'OPEN ON THE AUDIENCE SCREEN'}</span><h3>{role === 'pen' ? 'Open Inkstage Pen.' : 'Just the presentation.'}</h3><p>{role === 'pen' ? 'Scan to join this session in the Android app. If your camera opens a web page, tap Open Inkstage Pen there.' : 'Open this view in a new window, move it to the projector, and press F for fullscreen.'}</p><button className="secondary-button" disabled={!link} onClick={() => window.open(link, '_blank', 'noopener,noreferrer')}>Open {role === 'pen' ? 'pen' : 'audience'} view <MoveUpRight size={16} /></button></div></div>
+      <label className="field-label" htmlFor="network-address">Laptop network address</label><select id="network-address" value={base} onChange={e => setBase(e.target.value)}>{addresses.map(a => <option key={a}>{a}</option>)}<option value="custom">Custom domain / IP…</option></select>
+      {base === 'custom' && <div className="custom-address"><label className="field-label" htmlFor="custom-network-address">Custom domain or IP address</label><input id="custom-network-address" type="text" inputMode="url" autoCapitalize="none" autoCorrect="off" spellCheck={false} placeholder="https://slides.example.com or 192.168.1.20:4173" value={customAddress} onChange={e => setCustomAddress(e.target.value)} aria-invalid={!!customAddress.trim() && !!custom.error} aria-describedby="custom-address-help" /><p id="custom-address-help" className={customAddress.trim() && custom.error ? 'address-error' : ''}>{customAddress.trim() && custom.error ? custom.error : 'Include the port for a direct IP connection. The QR code and links update as you type.'}</p></div>}
+      <div className="copy-field"><input aria-label={`${role} session link`} readOnly disabled={!link} value={link} placeholder="Enter a valid server address above" onFocus={e => e.target.select()} /><IconButton label="Copy link" disabled={!link} onClick={() => void copy()}>{copied === role ? <Check size={19} /> : <Copy size={19} />}</IconButton></div>
+      {role === 'pen' && <p className="native-client-download"><a href="/Inkstage-Pen.apk" download>Download Android pen app</a><span>Install once, then scan the QR to connect. Copy link still opens the browser pen view.</span></p>}
       <p className="fine-print">If the tablet cannot connect, try another address above and allow Node.js through Windows Firewall on your private network. Session links grant access to this deck; share them only with your devices.</p>
     </> : <div className="modal-loading"><LoaderCircle className="spin" /> Preparing your links…</div>}
     {error && <p className="error-message" role="alert">{error}</p>}
   </Modal>;
 }
 
-function InkToolbar({ tool, setTool, color, setColor, width, setWidth, snap, setSnap, touch, setTouch, smoothing, setSmoothing, pressure, setPressure, stylusBinding, setStylusBinding, send, slide, disabled, compact }: {
+function InkToolbar({ tool, setTool, color, setColor, width, setWidth, snap, setSnap, touch, setTouch, smoothing, setSmoothing, pressure, setPressure, stylusBinding, setStylusBinding, send, slide, disabled }: {
   tool: Tool; setTool: (tool: Tool) => void; color: string; setColor: (c: string) => void; width: number; setWidth: (n: number) => void;
   snap: boolean; setSnap: (v: boolean) => void; touch: boolean; setTouch: (v: boolean) => void;
   smoothing: SmoothingPreset; setSmoothing: (v: SmoothingPreset) => void; pressure: number; setPressure: (v: number) => void;
   stylusBinding: StylusBinding; setStylusBinding: (v: StylusBinding) => void;
-  send: (op: Operation) => boolean; slide: number; disabled: boolean; compact?: boolean;
+  send: (op: Operation) => boolean; slide: number; disabled: boolean;
 }) {
   const [settings, setSettings] = useState(false);
   const [penOptions, setPenOptions] = useState(false);
   const penMenu = useRef<HTMLDivElement>(null);
+  const settingsMenu = useRef<HTMLDivElement>(null);
   useEffect(() => {
-    const outside = (e: globalThis.PointerEvent) => { if (!penMenu.current?.contains(e.target as Node)) setPenOptions(false); };
+    const outside = (e: globalThis.PointerEvent) => {
+      const target = e.target as HTMLElement;
+      if (!penMenu.current?.contains(target)) setPenOptions(false);
+      if (!settingsMenu.current?.contains(target) && !target.closest('.stylus-binding-dialog')) setSettings(false);
+    };
     const escape = (e: KeyboardEvent) => { if (e.key === 'Escape') { setPenOptions(false); setSettings(false); } };
-    document.addEventListener('pointerdown', outside); document.addEventListener('keydown', escape);
-    return () => { document.removeEventListener('pointerdown', outside); document.removeEventListener('keydown', escape); };
+    document.addEventListener('pointerdown', outside, true); document.addEventListener('keydown', escape);
+    return () => { document.removeEventListener('pointerdown', outside, true); document.removeEventListener('keydown', escape); };
   }, []);
-  return <div className={`ink-toolbar ${compact ? 'compact' : ''}`}>
+  return <div className="ink-toolbar">
     <div className="toolbar-group">{tools.map(({ key, label, shortcut, icon: Icon }) => key === 'pen' ? <div className="pen-control" ref={penMenu} key={key}>
       <IconButton label="Pen (P)" onClick={() => setTool('pen')} active={tool === 'pen'} disabled={disabled}><PenLine size={21} /></IconButton>
       <IconButton label="Smoothed pen (S)" onClick={() => setTool('smooth-pen')} active={tool === 'smooth-pen'} disabled={disabled}><Spline size={21} /></IconButton>
@@ -151,7 +180,7 @@ function InkToolbar({ tool, setTool, color, setColor, width, setWidth, snap, set
     </div> : <IconButton key={key} label={`${label} (${shortcut})`} onClick={() => setTool(key)} active={tool === key} disabled={disabled}><Icon size={21} /></IconButton>)}</div><span className="toolbar-divider" />
     <div className="toolbar-group colors">{colors.map(c => <button className={`color-choice ${c === color ? 'selected' : ''}`} key={c} aria-label={`Ink ${c}`} aria-pressed={c === color} style={{ '--swatch': c } as React.CSSProperties} onClick={() => setColor(c)}><span />{c === color && <Check size={12} color={c === '#ffffff' ? '#173e33' : 'white'} />}</button>)}</div><span className="toolbar-divider" />
     <div className="toolbar-group history"><IconButton label="Undo ink (Ctrl+Z)" onClick={() => send({ type: 'undo', slide })} disabled={disabled}><Undo2 size={19} /></IconButton><IconButton label="Redo ink (Ctrl+Shift+Z)" onClick={() => send({ type: 'redo', slide })} disabled={disabled}><Redo2 size={19} /></IconButton></div>
-    <div className="settings-wrap"><IconButton label="Tool settings" onClick={() => { setSettings(!settings); setPenOptions(false); }} active={settings}><Settings2 size={19} /></IconButton>{settings && <div className="pen-settings"><strong>Tool settings</strong><label>Stroke width <span>{width} px</span><input className="tool-range" style={{ '--range-progress': `${(width - 2) / 8 * 100}%` } as React.CSSProperties} type="range" min="2" max="10" step="1" value={width} onChange={e => setWidth(Number(e.target.value))} /></label><label className="switch-label"><span>Snap line angles<small>Near 0°, 45°, and 90°</small></span><input type="checkbox" checked={snap} onChange={e => setSnap(e.target.checked)} /></label><label className="switch-label"><span>Draw with a finger<small>Turn off for palm rejection</small></span><input type="checkbox" checked={touch} onChange={e => setTouch(e.target.checked)} /></label><StylusButtonSettings binding={stylusBinding} onChange={setStylusBinding} /><p>Hold still for 0.55 s to straighten a pen stroke. Stylus side and eraser buttons erase strokes.</p><button className="danger-button" disabled={disabled} onClick={() => { send({ type: 'clear', slide }); setSettings(false); }}><Trash2 size={15} /> Clear ink on this slide</button><small>You can undo this.</small></div>}</div>
+    <div className="settings-wrap" ref={settingsMenu}><IconButton label="Tool settings" onClick={() => { setSettings(!settings); setPenOptions(false); }} active={settings}><Settings2 size={19} /></IconButton>{settings && <div className="pen-settings"><strong>Tool settings</strong><label>Stroke width <span>{width} px</span><input className="tool-range" style={{ '--range-progress': `${(width - 2) / 8 * 100}%` } as React.CSSProperties} type="range" min="2" max="10" step="1" value={width} onChange={e => setWidth(Number(e.target.value))} /></label><label className="switch-label"><span>Snap line angles<small>Near 0°, 45°, and 90°</small></span><input type="checkbox" checked={snap} onChange={e => setSnap(e.target.checked)} /></label><label className="switch-label"><span>Draw with a finger<small>Turn off for palm rejection</small></span><input type="checkbox" checked={touch} onChange={e => setTouch(e.target.checked)} /></label><StylusButtonSettings binding={stylusBinding} onChange={setStylusBinding} /><p>Hold still for 0.55 s to straighten a stroke. Stylus side and eraser buttons erase strokes.</p><button className="danger-button" disabled={disabled} onClick={() => { send({ type: 'clear', slide }); setSettings(false); }}><Trash2 size={15} /> Clear ink on this slide</button><small>You can undo this.</small></div>}</div>
   </div>;
 }
 
@@ -177,6 +206,7 @@ function Session({ credentials, home }: { credentials: Credentials; home: () => 
   const audience = credentials.role === 'audience', tablet = credentials.role === 'pen';
   const navigate = (current: number) => { if (room && connected && !audience && current >= 0 && current < room.slides.length) send({ type: 'navigate', current }); };
   const fullscreen = async () => {
+    if (nativePenClient) return;
     try { if (document.fullscreenElement) await document.exitFullscreen(); else await document.documentElement.requestFullscreen(); }
     catch { setError('Fullscreen is unavailable in this browser. Use the browser fullscreen control.'); }
   };
@@ -232,26 +262,41 @@ function Session({ credentials, home }: { credentials: Credentials; home: () => 
     {!connected && <div className="audience-disconnected"><Unplug size={15} /> Connection lost. Waiting for the presenter.</div>}
   </main>;
   return <div className={`session ${tablet ? 'tablet-session' : ''} ${notes ? '' : 'notes-hidden'}`} style={{ '--aspect': room.width / room.height } as React.CSSProperties}>
-    <header className="app-header"><span className="view-label">{tablet ? 'Pen view' : 'Presenter view'}</span><div className="header-actions"><Connection connected={connected} latency={latency} />{!tablet && <><button className="secondary-button connect-button" onClick={() => setDevices(true)}><Link size={16} /> Connect devices<span className="count-badge">{counts.pen + counts.audience}</span></button><button className="primary-button export-button" onClick={() => void exportFile()} disabled={exporting || !connected}>{exporting ? <LoaderCircle className="spin" size={17} /> : exported ? <Check size={17} /> : <ArrowDownToLine size={17} />}{exporting ? 'Exporting…' : exported ? 'Downloaded' : 'Export .pptx'}</button></>}<IconButton label="Fullscreen (F)" onClick={() => void fullscreen()}><Maximize2 size={18} /></IconButton></div></header>
+    <header className="app-header"><span className="view-label">{tablet ? 'Pen view' : 'Presenter view'}</span><div className="header-actions"><Connection connected={connected} latency={latency} />{!tablet && <><button className="secondary-button connect-button" onClick={() => setDevices(true)}><Link size={16} /> Connect devices<span className="count-badge">{counts.pen + counts.audience}</span></button><button className="primary-button export-button" onClick={() => void exportFile()} disabled={exporting || !connected}>{exporting ? <LoaderCircle className="spin" size={17} /> : exported ? <Check size={17} /> : <ArrowDownToLine size={17} />}{exporting ? 'Exporting…' : exported ? 'Downloaded' : 'Export .pptx'}</button></>}{!tablet && <div className="presenter-tools"><IconButton label="Black out audience screen (B)" active={room.blackout} disabled={!connected} onClick={() => send({ type: 'blackout', value: !room.blackout })}><MonitorOff size={18} /></IconButton><IconButton label={notes ? 'Hide speaker notes' : 'Show speaker notes'} onClick={() => setNotes(!notes)}>{notes ? <PanelRightClose size={18} /> : <PanelRightOpen size={18} />}</IconButton></div>}{!nativePenClient && <IconButton label="Fullscreen (F)" onClick={() => void fullscreen()}><Maximize2 size={18} /></IconButton>}</div></header>
     {error && <div className="session-error" role="alert"><Unplug size={17} /><span>{error}</span><IconButton label="Dismiss message" onClick={() => setError('')}><X size={16} /></IconButton></div>}
     {!connected && <div className="reconnect-banner"><LoaderCircle className="spin" size={15} /> Reconnecting to the laptop. Ink is paused until all views can sync.</div>}
     <div className="workspace">
-      {!tablet && <aside className="slide-rail"><div className="rail-heading"><span>SLIDES</span><span>{room.slides.length.toString().padStart(2, '0')}</span></div><nav aria-label="Slides">{room.slides.map((slide, i) => <button key={i} className={`slide-thumbnail ${room.current === i ? 'current' : ''}`} onClick={() => navigate(i)} disabled={!connected} aria-label={`Slide ${i + 1}: ${slide.title}`} aria-current={room.current === i ? 'step' : undefined}><div><SlideCanvas room={room} slide={i} credentials={credentials} /></div><span className="thumbnail-caption"><span>{(i + 1).toString().padStart(2, '0')}</span><span>{slide.title}</span>{(room.strokes[i]?.length ?? 0) > 0 && <PenLine size={12} />}</span></button>)}</nav><button className="rail-help" onClick={() => setHelp(true)}><CircleHelp size={17} /> Tips & shortcuts</button></aside>}
+      {!tablet && <aside className="slide-rail"><div className="rail-heading"><span>SLIDES</span><span>{room.slides.length.toString().padStart(2, '0')}</span></div><nav aria-label="Slides">{room.slides.map((slide, i) => <button key={i} className={`slide-thumbnail ${room.current === i ? 'current' : ''}`} onClick={() => navigate(i)} disabled={!connected} aria-label={`Slide ${i + 1}: ${slide.title}`} aria-current={room.current === i ? 'step' : undefined}><div><SlideCanvas room={room} slide={i} credentials={credentials} preview /></div><span className="thumbnail-caption"><span>{(i + 1).toString().padStart(2, '0')}</span><span>{slide.title}</span>{(room.strokes[i]?.length ?? 0) > 0 && <PenLine size={12} />}</span></button>)}</nav><button className="rail-help" onClick={() => setHelp(true)}><CircleHelp size={17} /> Tips & shortcuts</button></aside>}
       <main className="stage">
         {room.blackout && <span className="canvas-blackout-indicator">Audience blacked out</span>}
         <div className="stage-slide"><SlideViewport {...canvasProps} controlsTarget={viewportControls} /></div>
         <div className="toolbar-area"><div className="unified-toolbar" aria-label="Presentation tools">
           <div className="slide-navigation"><IconButton label="Previous slide" disabled={!connected || room.current === 0} onClick={() => navigate(room.current - 1)}><ChevronLeft size={25} /></IconButton><span>{String(room.current + 1).padStart(2, '0')}<i>/</i>{String(room.slides.length).padStart(2, '0')}</span><IconButton label="Next slide" disabled={!connected || room.current === room.slides.length - 1} onClick={() => navigate(room.current + 1)}><ChevronRight size={25} /></IconButton></div>
-          <InkToolbar {...{ tool, setTool, color, setColor, width, setWidth, snap, setSnap, touch, setTouch, smoothing, setSmoothing, pressure, setPressure, stylusBinding, setStylusBinding, send }} slide={room.current} disabled={!connected} compact={tablet} />
-          <div className="view-tools"><div ref={setViewportControls} className="viewport-tools-slot" />{!tablet && <div className="presenter-tools"><IconButton label="Black out audience screen (B)" active={room.blackout} disabled={!connected} onClick={() => send({ type: 'blackout', value: !room.blackout })}><MonitorOff size={18} /></IconButton><IconButton label={notes ? 'Hide speaker notes' : 'Show speaker notes'} onClick={() => setNotes(!notes)}>{notes ? <PanelRightClose size={18} /> : <PanelRightOpen size={18} />}</IconButton></div>}</div>
+          <InkToolbar {...{ tool, setTool, color, setColor, width, setWidth, snap, setSnap, touch, setTouch, smoothing, setSmoothing, pressure, setPressure, stylusBinding, setStylusBinding, send }} slide={room.current} disabled={!connected} />
+          <div className="view-tools"><div ref={setViewportControls} className="viewport-tools-slot" /></div>
         </div></div>
       </main>
-      {!tablet && notes && <aside className="presenter-panel"><div className="panel-clock"><span className="eyebrow">YOUR TIME</span><Clock room={room} send={send} /></div><div className="notes-block"><div className="panel-section-heading"><h2>Speaker notes</h2><span>ONLY YOU</span></div><div className="notes-content">{room.slides[room.current].notes || <p className="empty-notes">No speaker notes on this slide. Add them in PowerPoint before importing.</p>}</div></div><div className="next-slide-block"><div className="panel-section-heading"><h2>Up next</h2><span>{room.current < room.slides.length - 1 ? `${room.current + 2} / ${room.slides.length}` : 'END'}</span></div>{room.current < room.slides.length - 1 ? <button className="next-slide-preview" onClick={() => navigate(room.current + 1)} disabled={!connected}><SlideCanvas room={room} slide={room.current + 1} credentials={credentials} /><span>{room.slides[room.current + 1].title}<ArrowRight size={15} /></span></button> : <div className="end-slide"><Check size={25} /><p>That’s your last slide.</p><span>Export the deck to keep your ink.</span></div>}</div><div className="device-summary"><div><Tablet size={17} /><span>Tablet pen</span><span className={counts.pen ? 'device-connected' : ''}>{counts.pen ? 'Connected' : 'Waiting'}</span></div><div><Monitor size={17} /><span>Audience</span><span className={counts.audience ? 'device-connected' : ''}>{counts.audience ? 'Connected' : 'Waiting'}</span></div><button className="text-button" onClick={() => setDevices(true)}>Manage connections <ArrowRight size={14} /></button></div></aside>}
+      {!tablet && notes && <aside className="presenter-panel"><div className="panel-clock"><span className="eyebrow">YOUR TIME</span><Clock room={room} send={send} /></div><div className="notes-block"><div className="panel-section-heading"><h2>Speaker notes</h2><span>ONLY YOU</span></div><div className="notes-content">{room.slides[room.current].notes || <p className="empty-notes">No speaker notes on this slide. Add them in PowerPoint before importing.</p>}</div></div><div className="next-slide-block"><div className="panel-section-heading"><h2>Up next</h2><span>{room.current < room.slides.length - 1 ? `${room.current + 2} / ${room.slides.length}` : 'END'}</span></div>{room.current < room.slides.length - 1 ? <button className="next-slide-preview" onClick={() => navigate(room.current + 1)} disabled={!connected}><SlideCanvas room={room} slide={room.current + 1} credentials={credentials} preview /><span>{room.slides[room.current + 1].title}<ArrowRight size={15} /></span></button> : <div className="end-slide"><Check size={25} /><p>That’s your last slide.</p><span>Export the deck to keep your ink.</span></div>}</div><div className="device-summary"><div><Tablet size={17} /><span>Tablet pen</span><span className={counts.pen ? 'device-connected' : ''}>{counts.pen ? 'Connected' : 'Waiting'}</span></div><div><Monitor size={17} /><span>Audience</span><span className={counts.audience ? 'device-connected' : ''}>{counts.audience ? 'Connected' : 'Waiting'}</span></div><button className="text-button" onClick={() => setDevices(true)}>Manage connections <ArrowRight size={14} /></button></div></aside>}
     </div>
     {devices && <Devices credentials={credentials} counts={counts} close={() => setDevices(false)} />}{help && <HelpModal close={() => setHelp(false)} />}
   </div>;
 }
 
+function OpenPenApp() {
+  let links: ReturnType<typeof penLaunchLinks> | undefined;
+  try { links = penLaunchLinks(location.href); } catch { /* Invalid links cannot open another role in the app. */ }
+  const android = /Android/i.test(navigator.userAgent);
+  const attempted = new URLSearchParams(location.search).has('appAttempt');
+  const fallback = links ? new URL(links.qr) : null;
+  fallback?.searchParams.set('appAttempt', '1');
+  const intent = links && fallback ? links.intent.replace(encodeURIComponent(links.qr), encodeURIComponent(fallback.toString())) : '';
+  useEffect(() => {
+    if (!android || !links || attempted) return;
+    const timer = window.setTimeout(() => window.location.replace(intent), 180);
+    return () => window.clearTimeout(timer);
+  }, [android, attempted, intent, links]);
+  return <main className="app-handoff"><span className="view-label">Inkstage Pen</span><h1>Write on your tablet.</h1>{links ? <><p>Open this session in the Android app for native S Pen input.</p><a className="primary-button" href={android ? intent : links.app}>Open Inkstage Pen <ArrowRight size={18} /></a><a className="secondary-button" href="/Inkstage-Pen.apk" download>Install / update Android app <ArrowDownToLine size={17} /></a><a className="text-button" href={links.browser}>Continue in browser</a><p className="fine-print">After installing, scan the QR again. Keep Tailscale connected when using a private Tailscale address.</p></> : <><p>This pen link is incomplete. Scan a new QR from Connect devices on your laptop.</p><a className="secondary-button" href="/">Back to Inkstage</a></>}</main>;
+}
 function App() {
   const [credentials, setCredentials] = useState<Credentials | null>(parseCredentials);
   useEffect(() => { const pop = () => setCredentials(parseCredentials()); window.addEventListener('popstate', pop); return () => window.removeEventListener('popstate', pop); }, []);
@@ -259,4 +304,4 @@ function App() {
   function home() { history.pushState(null, '', '/'); setCredentials(null); }
   return credentials ? <Session key={`${credentials.id}-${credentials.role}`} credentials={credentials} home={home} /> : <Welcome onOpen={open} />;
 }
-createRoot(document.getElementById('root')!).render(<React.StrictMode><App /></React.StrictMode>);
+createRoot(document.getElementById('root')!).render(<React.StrictMode>{location.pathname === '/open-pen' ? <OpenPenApp /> : <App />}</React.StrictMode>);

@@ -17,14 +17,31 @@ test('pinching changes scale and moves the same page content with the finger mid
   const pan = pinchView(before, a, b, { x: -80, y: -20 }, { x: 120, y: 80 });
   assert.equal(pan.scale, 1); assert.equal(pan.x, 20); assert.equal(pan.y, 30);
 });
-test('bounds prevent losing the page and fit resets panning for any aspect ratio', () => {
+test('zoomed panning exposes space beyond all four edges without losing the page', () => {
   for (const aspect of [16 / 9, 4 / 3, 9 / 16]) {
     const viewport = { width: 1000, height: 700 }, slide = fitSlide(viewport, aspect);
     assert.ok(slide.width <= viewport.width && slide.height <= viewport.height);
-    const zoomed = constrainView({ scale: 3, x: 100000, y: -100000 }, viewport, slide);
-    assert.ok(zoomed.x <= (slide.width * 3 - viewport.width) / 2);
-    assert.ok(zoomed.y >= -(slide.height * 3 - viewport.height) / 2);
-    const fitted = constrainView({ scale: 1, x: 100, y: -500 }, viewport, slide);
+    for (const scale of [1.01, 1.25, 3, 6]) {
+      const width = slide.width * scale, height = slide.height * scale;
+      for (const direction of [-1, 1]) {
+        const moved = constrainView({ scale, x: direction * 100000, y: direction * 100000 }, viewport, slide);
+        assert.ok(Math.abs(moved.x) > Math.max(0, (width - viewport.width) / 2));
+        assert.ok(Math.abs(moved.y) > Math.max(0, (height - viewport.height) / 2));
+        const left = viewport.width / 2 + moved.x - width / 2;
+        const top = viewport.height / 2 + moved.y - height / 2;
+        // A slide edge can reach the center; the page still intersects it.
+        const close = (a, b) => assert.ok(Math.abs(a - b) < 1e-8);
+        close(direction > 0 ? left : left + width, viewport.width / 2);
+        close(direction > 0 ? top : top + height, viewport.height / 2);
+      }
+    }
+  }
+});
+
+test('returning to fit or smaller zoom recenters a previously overscrolled page', () => {
+  const viewport = { width: 1000, height: 700 }, slide = fitSlide(viewport, 16 / 9);
+  for (const scale of [.5, 1]) {
+    const fitted = constrainView({ scale, x: 10000, y: -10000 }, viewport, slide);
     assert.equal(Math.abs(fitted.x), 0); assert.equal(Math.abs(fitted.y), 0);
   }
 });

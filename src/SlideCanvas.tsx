@@ -1,9 +1,10 @@
-import { useEffect, useImperativeHandle, useLayoutEffect, useRef, useState } from 'react';
+import { lazy, Suspense, useEffect, useImperativeHandle, useRef, useState } from 'react';
 import type { PointerEvent as ReactPointerEvent, Ref } from 'react';
-import { InkRenderer, inkBitmapSize, hitStrokes, snapLine } from './ink';
+import { hitStrokes, snapLine } from './ink';
 import { slidePoint } from './viewport';
+import { InkLayer } from './InkLayer';
 import { PenSmoother, type SmoothingPreset } from './smoothing';
-import { defaultStylusBinding, hasDrawingContact, StylusEraser, type StylusBinding } from './stylus';
+import { defaultStylusBinding, hasDrawingContact, pointerSignal, StylusEraser, type StylusBinding } from './stylus';
 import { type Room, type Credentials, type Tool, type Point, type Operation, type Stroke, imageURL, uid } from './types';
 
 type Props = {
@@ -14,45 +15,29 @@ type Props = {
   smoothing?: SmoothingPreset;
   pressure?: number;
   stylusBinding?: StylusBinding;
+  preview?: boolean; renderX?: number; renderY?: number;
 };
 export type SlideCanvasHandle = { cancelTouchStroke: () => void; isDrawing: () => boolean; isPenActive: () => boolean };
 const empty: Stroke[] = [];
-export function SlideCanvas({ room, slide, credentials, interactive = false, tool = 'pen', color = '#e4594e', width = 4, touch = true, snap = true, send, laser, inputRef, renderScale = 1, smoothing = 'balanced', pressure = 60, stylusBinding = defaultStylusBinding }: Props) {
+const PdfSlide = lazy(() => import('./PdfSlide').then(module => ({ default: module.PdfSlide })));
+export function SlideCanvas({ room, slide, credentials, interactive = false, tool = 'pen', color = '#e4594e', width = 4, touch = true, snap = true, send, laser, inputRef, renderScale = 1, smoothing = 'balanced', pressure = 60, stylusBinding = defaultStylusBinding, preview = false, renderX = 0, renderY = 0 }: Props) {
   const container = useRef<HTMLDivElement>(null);
-  const canvas = useRef<HTMLCanvasElement>(null);
-  const renderer = useRef<InkRenderer | null>(null);
-  const active = useRef<{ id: string; pointer: number; pointerType: string; start: Point; last: Point; slide: number; mode: Tool; modifier: boolean; line: boolean; anchor: Point; smoother?: PenSmoother } | null>(null);
+  const active = useRef<{ id: string; pointer: number; pointerType: string; start: Point; last: Point; slide: number; mode: Tool; modifier: boolean; moved: boolean; line: boolean; anchor: Point; smoother?: PenSmoother } | null>(null);
   const eraserButton = useRef(new StylusEraser(stylusBinding));
   const [hardwareErasing, setHardwareErasing] = useState(false);
   const deferredTouch = useRef<{ pointer: number; timer: ReturnType<typeof setTimeout>; begin: () => void; moves: (() => void)[] } | null>(null);
   const hold = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
-  const [hint, setHint] = useState('');
-  const [size, setSize] = useState({ width: 1600, height: 900 });
   const [laserVisible, setLaserVisible] = useState(false);
   const ink = room.strokes[slide] ?? empty;
   const inkRef = useRef(ink); inkRef.current = ink;
   const aspect = room.width / room.height;
-  useEffect(() => {
-    if (!container.current) return;
-    const observer = new ResizeObserver(entries => {
-      const r = entries[0].contentRect;
-      if (r.width && r.height) setSize(inkBitmapSize(r.width, r.height, (devicePixelRatio || 1) * renderScale));
-    });
-    observer.observe(container.current);
-    return () => observer.disconnect();
-  }, [renderScale]);
-  useLayoutEffect(() => {
-    if (!canvas.current) return;
-    renderer.current ??= new InkRenderer(document.createElement('canvas'));
-    renderer.current.render(canvas.current, ink);
-  }, [ink, size]);
   useEffect(() => {
     setLaserVisible(!!laser?.point);
     const timer = setTimeout(() => setLaserVisible(false), 1200);
     return () => clearTimeout(timer);
   }, [laser]);
   useEffect(() => () => { clearTimeout(hold.current); if (deferredTouch.current) clearTimeout(deferredTouch.current.timer); }, []);
-  useEffect(() => { active.current = null; clearTimeout(hold.current); if (deferredTouch.current) clearTimeout(deferredTouch.current.timer); deferredTouch.current = null; setHint(''); }, [slide, interactive]);
+  useEffect(() => { active.current = null; clearTimeout(hold.current); if (deferredTouch.current) clearTimeout(deferredTouch.current.timer); deferredTouch.current = null; }, [slide, interactive]);
   useEffect(() => { eraserButton.current = new StylusEraser(stylusBinding); setHardwareErasing(false); }, [stylusBinding, tool, slide]);
   useEffect(() => { const reset = () => { eraserButton.current.reset(); setHardwareErasing(false); }; window.addEventListener('blur', reset); return () => window.removeEventListener('blur', reset); }, []);
   useImperativeHandle(inputRef, () => ({
@@ -62,7 +47,7 @@ export function SlideCanvas({ room, slide, credentials, interactive = false, too
       if (deferredTouch.current) { clearTimeout(deferredTouch.current.timer); deferredTouch.current = null; }
       const a = active.current;
       if (!a || a.pointerType !== 'touch') return;
-      clearTimeout(hold.current); active.current = null; setHint('');
+      clearTimeout(hold.current); active.current = null;
       if (a.mode === 'laser') send?.({ type: 'laser', slide: a.slide, point: null });
       else send?.({ type: 'stroke-cancel', slide: a.slide, id: a.id });
     },
@@ -73,14 +58,13 @@ export function SlideCanvas({ room, slide, credentials, interactive = false, too
   };
   const straighten = () => {
     const a = active.current;
-    if (!a || !['pen', 'smooth-pen'].includes(a.mode)) return;
+    if (!a || !['pen', 'smooth-pen', 'highlighter'].includes(a.mode)) return;
     a.line = true;
-    send?.({ type: 'stroke-replace', slide: a.slide, id: a.id, points: [a.start, snapLine(a.start, a.last, aspect, snap)] });
-    setHint('Straight line');
+    send?.({ type: 'stroke-replace', slide: a.slide, id: a.id, points: [a.start, snapLine(a.start, a.last, aspect, snap)], ...(a.mode === 'pen' || a.mode === 'smooth-pen' ? { sensitivity: 0 } : {}) });
   };
   const armHold = (p: Point) => {
     clearTimeout(hold.current);
-    if (!active.current || !['pen', 'smooth-pen'].includes(active.current.mode) || active.current.line) return;
+    if (!active.current || !['pen', 'smooth-pen', 'highlighter'].includes(active.current.mode) || active.current.line) return;
     active.current.anchor = p;
     hold.current = setTimeout(straighten, 550);
   };
@@ -89,14 +73,14 @@ export function SlideCanvas({ room, slide, credentials, interactive = false, too
     const ids = hitStrokes(inkRef.current, p, previous, aspect, radius);
     if (ids.length) send?.({ type: 'erase', slide, ids, gesture: active.current?.pointerType === 'touch' ? active.current.id : undefined });
   };
-  const readButton = (e: ReactPointerEvent<HTMLCanvasElement>) => {
-    const physical = eraserButton.current.update(e);
+  const readButton = (e: ReactPointerEvent<HTMLDivElement>) => {
+    const physical = eraserButton.current.update(pointerSignal(e));
     const pressed = physical;
     setHardwareErasing(pressed); return pressed;
   };
   const startStroke = (p: Point, pointer: number, pointerType: string, time: number, modifier: boolean) => {
     const id = uid(), mode = modifier ? 'eraser' : tool;
-    active.current = { id, pointer, pointerType, start: p, last: p, anchor: p, slide, mode, modifier, line: mode === 'line', smoother: mode === 'smooth-pen' ? new PenSmoother(smoothing, aspect, p, time) : undefined };
+    active.current = { id, pointer, pointerType, start: p, last: p, anchor: p, slide, mode, modifier, moved: false, line: mode === 'line', smoother: mode === 'smooth-pen' ? new PenSmoother(smoothing, aspect, p, time) : undefined };
     if (mode === 'eraser') erase(p, null);
     else if (mode === 'laser') send?.({ type: 'laser', slide, point: p });
     else {
@@ -105,22 +89,23 @@ export function SlideCanvas({ room, slide, credentials, interactive = false, too
       armHold(p);
     }
   };
-  const finishStroke = () => {
+  const finishStroke = (cancel = false) => {
     const a = active.current; if (!a) return;
     clearTimeout(hold.current);
-    if (a.smoother && !a.line) {
+    if (a.smoother && !a.line && !cancel) {
       const tail = a.smoother.finish();
       if (tail.length) send?.({ type: 'stroke-points', slide: a.slide, id: a.id, points: tail });
     }
     if (a.mode === 'laser') send?.({ type: 'laser', slide: a.slide, point: null });
-    else if (a.mode !== 'eraser') send?.({ type: 'stroke-end', slide: a.slide, id: a.id });
-    active.current = null; setHint('');
+    else if (a.mode !== 'eraser') send?.({ type: cancel ? 'stroke-cancel' : 'stroke-end', slide: a.slide, id: a.id });
+    active.current = null;
   };
-  const down = (e: ReactPointerEvent<HTMLCanvasElement>) => {
+  const down = (e: ReactPointerEvent<HTMLDivElement>) => {
     const modifier = e.pointerType === 'touch' ? false : readButton(e);
     if (!interactive || active.current || deferredTouch.current || (e.pointerType === 'touch' && !touch)) return;
     if (!hasDrawingContact(e) || (e.pointerType === 'mouse' && e.button !== 0 && !modifier)) return;
-    e.preventDefault(); e.currentTarget.setPointerCapture(e.pointerId);
+    e.preventDefault();
+    if (e.nativeEvent.isTrusted) e.currentTarget.setPointerCapture(e.pointerId);
     const p = point(e);
     const pointer = e.pointerId, pointerType = e.pointerType, time = e.timeStamp;
     const begin = () => startStroke(p, pointer, pointerType, time, modifier);
@@ -138,9 +123,10 @@ export function SlideCanvas({ room, slide, credentials, interactive = false, too
   const updateStroke = (p: Point, points: Point[], times: number[]) => {
     const a = active.current; if (!a) return;
     const previous = a.last; a.last = p;
+    if (p.x !== previous.x || p.y !== previous.y) a.moved = true;
     if (a.mode === 'eraser') erase(p, previous);
     else if (a.mode === 'laser') send?.({ type: 'laser', slide: a.slide, point: p });
-    else if (a.line) send?.({ type: 'stroke-replace', slide: a.slide, id: a.id, points: [a.start, snapLine(a.start, p, aspect, snap)] });
+    else if (a.line) send?.({ type: 'stroke-replace', slide: a.slide, id: a.id, points: [a.start, snapLine(a.start, p, aspect, snap)], ...(a.mode === 'pen' || a.mode === 'smooth-pen' ? { sensitivity: 0 } : {}) });
     else {
       const rect = container.current!.getBoundingClientRect();
       const output = a.smoother ? points.map((sample, i) => a.smoother!.push(sample, times[i])) : points;
@@ -148,7 +134,7 @@ export function SlideCanvas({ room, slide, credentials, interactive = false, too
       if (Math.hypot((p.x - a.anchor.x) * rect.width, (p.y - a.anchor.y) * rect.height) > 5) armHold(p);
     }
   };
-  const move = (e: ReactPointerEvent<HTMLCanvasElement>) => {
+  const move = (e: ReactPointerEvent<HTMLDivElement>) => {
     const modifier = e.pointerType === 'touch' ? false : readButton(e);
     if (e.pointerType === 'pen' && active.current?.pointer === e.pointerId && !hasDrawingContact(e)) { finishStroke(); return; }
     if (!active.current && !deferredTouch.current && e.pointerType === 'pen' && hasDrawingContact(e)) { down(e); return; }
@@ -156,7 +142,14 @@ export function SlideCanvas({ room, slide, credentials, interactive = false, too
     e.preventDefault();
     const p = point(e), rect = container.current!.getBoundingClientRect();
     if (active.current && active.current.modifier !== modifier) {
-      finishStroke(); startStroke(p, e.pointerId, e.pointerType, e.timeStamp, modifier); return;
+      const a = active.current;
+      // A side button held before touching is distinguishable only on the
+      // first move. Remove that provisional dot without adding an undo step.
+      const discardTip = stylusBinding.kind === 's-pen' && modifier && !a.moved && a.mode !== 'eraser' && a.mode !== 'laser';
+      const first = a.start;
+      finishStroke(discardTip); startStroke(p, e.pointerId, e.pointerType, e.timeStamp, modifier);
+      if (discardTip) erase(p, first);
+      return;
     }
     const native = e.nativeEvent;
     const events = typeof native.getCoalescedEvents === 'function' ? native.getCoalescedEvents() : [];
@@ -165,7 +158,7 @@ export function SlideCanvas({ room, slide, credentials, interactive = false, too
     if (deferredTouch.current) deferredTouch.current.moves.push(() => updateStroke(p, points, times));
     else updateStroke(p, points, times);
   };
-  const up = (e: ReactPointerEvent<HTMLCanvasElement>) => {
+  const up = (e: ReactPointerEvent<HTMLDivElement>) => {
     if (e.pointerType !== 'touch' && e.type !== 'lostpointercapture') readButton(e);
     if (deferredTouch.current?.pointer === e.pointerId) commitTouch();
     const a = active.current; if (!a || e.pointerId !== a.pointer) return;
@@ -181,9 +174,10 @@ export function SlideCanvas({ room, slide, credentials, interactive = false, too
   };
   return <div className={`slide-canvas ${interactive ? 'can-write' : ''} tool-${hardwareErasing ? 'eraser' : tool}`} style={{ aspectRatio: aspect }} ref={container}>
     <img src={imageURL(room, slide, credentials)} alt={room.slides[slide].title} draggable={false} />
-    <canvas ref={canvas} width={size.width} height={size.height} aria-label={interactive ? 'Slide drawing surface' : 'Slide annotations'}
+    {!preview && <Suspense fallback={null}><PdfSlide credentials={credentials} slide={slide} scale={renderScale} x={renderX} y={renderY} /></Suspense>}
+    <InkLayer strokes={ink} aspect={aspect} />
+    <div className="ink-input" role="img" aria-label={interactive ? 'Slide drawing surface' : 'Slide annotations'}
       onPointerDown={down} onPointerMove={move} onPointerUp={up} onPointerCancel={up} onLostPointerCapture={up} onContextMenu={e => e.preventDefault()} />
     {laserVisible && laser?.slide === slide && laser.point && <span className="laser-dot" style={{ left: `${laser.point.x * 100}%`, top: `${laser.point.y * 100}%` }} />}
-    {(hint || hardwareErasing) && <span className="snap-hint">{hardwareErasing ? 'Eraser (stylus button)' : hint}</span>}
   </div>;
 }

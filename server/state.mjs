@@ -52,8 +52,9 @@ export function applyOperation(room, message, role) {
     case 'stroke-replace': {
       const stroke = ink.find(s => s.id === message.id);
       if (!stroke || !pointsValid(message.points)) throw new Error('Invalid ink points.');
+      if (message.type === 'stroke-replace' && message.sensitivity !== undefined && (!Number.isFinite(message.sensitivity) || message.sensitivity < 0 || message.sensitivity > 1)) throw new Error('Invalid pressure sensitivity.');
       const clean = message.points.map(cleanPoint);
-      if (message.type === 'stroke-replace') stroke.points = clean;
+      if (message.type === 'stroke-replace') { stroke.points = clean; if (message.sensitivity !== undefined) stroke.sensitivity = message.sensitivity; }
       else if (stroke.points.length + clean.length <= 20000) stroke.points.push(...clean);
       else throw new Error('Stroke limit reached. Lift the pen and continue.');
       break;

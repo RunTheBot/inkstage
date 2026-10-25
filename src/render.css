@@ -1,0 +1,13 @@
+.slide-canvas > .pdf-slide,
+.slide-canvas > .ink-vectors,
+.slide-canvas > .ink-input { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
+.pdf-slide { overflow: hidden; }
+.pdf-slide > canvas { position: absolute; display: block; }
+.slide-canvas.can-write > .ink-input { pointer-events: auto; touch-action: none; cursor: crosshair; }
+.slide-canvas.tool-eraser > .ink-input { cursor: cell; }
+.slide-viewport.hand-mode .ink-input { cursor: grab; }
+.slide-viewport.is-panning .ink-input { cursor: grabbing; }
+.pdf-error { position: absolute; top: 35px; left: 50%; transform: translateX(-50%); padding: 7px 12px; border-radius: 6px; background: #fff4db; color: #8b682e; font-size: 11px; line-height: 1.5; pointer-events: none; }
+.pdf-loading { position: absolute; top: 35px; left: 50%; transform: translateX(-50%); padding: 7px 12px; border-radius: 6px; background: #fcfdf8e6; color: #6f8661; font-size: 11px; line-height: 1.5; pointer-events: none; }
+.header-actions .presenter-tools > .icon-button { width: 30px; min-width: 30px; height: 30px; }
+.slide-fit { will-change: auto; }
