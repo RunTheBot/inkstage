@@ -30,7 +30,6 @@
 .unified-toolbar .view-tools, .unified-toolbar .viewport-controls { gap: 2px; }
 .unified-toolbar .viewport-controls { position: relative; touch-action: manipulation; }
 .unified-toolbar .icon-button,
-.unified-toolbar .pen-menu-arrow,
 .unified-toolbar .viewport-controls > button,
 .unified-toolbar .color-choice {
   width: var(--tool-size);
@@ -45,9 +44,7 @@
 }
 .unified-toolbar .icon-button > svg,
 .unified-toolbar .viewport-controls > button:not(.zoom-menu-button) > svg { width: 22px; height: 22px; }
-.unified-toolbar .pen-menu-arrow > svg { width: 17px; height: 17px; }
 .unified-toolbar .icon-button.active,
-.unified-toolbar .pen-menu-arrow.selected,
 .unified-toolbar .viewport-controls > button.selected { background: #173e33; color: #d5f291; }
 .unified-toolbar .slide-navigation { gap: 7px; }
 .unified-toolbar .slide-navigation > span { font-size: 11px; letter-spacing: .5px; color: #617955; white-space: nowrap; font-variant-numeric: tabular-nums; }
@@ -57,15 +54,22 @@
 .unified-toolbar .color-choice > span { width: 22px; height: 22px; border: 1px solid #00000018; border-radius: 50%; background: var(--swatch); }
 .unified-toolbar .color-choice.selected > span { box-shadow: 0 0 0 3px #fcfdf8, 0 0 0 4px var(--swatch); }
 .unified-toolbar .color-choice > svg { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); }
-.unified-toolbar .color-picker-input { position: fixed; left: -10px; top: -10px; width: 1px; height: 1px; opacity: 0; pointer-events: none; }
 .unified-toolbar .viewport-controls > .zoom-menu-button { width: 80px; min-width: 80px; flex-basis: 80px; gap: 5px; font-size: 11px; font-variant-numeric: tabular-nums; }
 .unified-toolbar :is(.pen-settings, .pen-submenu, .view-submenu) { bottom: calc(100% + 12px); padding: 18px; border: 1px solid #d6dfce; border-radius: 10px; background: #fcfdf8; box-shadow: 0 8px 30px #173e3326; }
 .unified-toolbar .stylus-binding-trigger { min-height: 48px; }
+.width-presets { display: flex; gap: 7px; margin: 4px 0 14px; }
+.width-presets > button { flex: 1; min-height: 46px; flex-direction: column; gap: 4px; border: 1px solid #e1e7da; border-radius: 7px; font-size: 10px; color: #617955; }
+.width-presets > button[aria-pressed=true] { border-color: #89a66f; background: #edf3e5; color: #173e33; }
+.width-presets > button > span { display: block; border-radius: 50%; background: currentColor; }
+.eraser-submenu { left: auto; right: 0; width: 242px; }
+.eraser-width-presets { margin-bottom: 12px; }
+.eraser-size-label { display: block; color: #6f8661; font-size: 11px; }
+.eraser-size-label > span { float: right; color: #87977d; font-variant-numeric: tabular-nums; }
+.eraser-size-label > input { display: block; width: 100%; margin-top: 5px; }
 .presenter-tools { display: flex; align-items: center; gap: 2px; }
 
 @media (hover: hover) and (pointer: fine) {
   .unified-toolbar .icon-button:hover:not(:disabled),
-  .unified-toolbar .pen-menu-arrow:hover,
   .unified-toolbar .viewport-controls > button:hover:not(:disabled),
   .unified-toolbar .color-choice:hover { background: #e7efdd; color: #173e33; }
 }

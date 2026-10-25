@@ -4,11 +4,11 @@ import { createPortal } from 'react-dom';
 import { ChevronDown, Hand, Maximize, Minus, Plus } from 'lucide-react';
 import { SlideCanvas, type SlideCanvasHandle } from './SlideCanvas';
 import { defaultStylusBinding, isEraserSignal } from './stylus';
-import { constrainView, fitSlide, fitView, pinchView, zoomAt, type Position, type View } from './viewport';
+import { constrainView, elasticView, edgeSlideStep, fitSlide, fitView, pinchView, zoomAt, type Position, type View } from './viewport';
 
-type Props = ComponentProps<typeof SlideCanvas> & { controlsTarget: HTMLElement | null };
-type Gesture = { view: View; points: Position[] };
-export function SlideViewport({ controlsTarget, ...props }: Props) {
+type Props = ComponentProps<typeof SlideCanvas> & { controlsTarget: HTMLElement | null; onSlideStep?: (step: number) => void };
+type Gesture = { view: View; points: Position[]; pinching: boolean };
+export function SlideViewport({ controlsTarget, onSlideStep, ...props }: Props) {
   const host = useRef<HTMLDivElement>(null);
   const input = useRef<SlideCanvasHandle | null>(null);
   const [size, setSize] = useState({ width: 1, height: 1 });
@@ -16,17 +16,28 @@ export function SlideViewport({ controlsTarget, ...props }: Props) {
   const current = useRef(view);
   const [hand, setHand] = useState(false);
   const [dragging, setDragging] = useState(false);
+  const [settling, setSettling] = useState(false);
+  const edgePull = useRef<Position>({ x: 0, y: 0 });
   const [options, setOptions] = useState(false);
   const menu = useRef<HTMLDivElement>(null);
   const pointers = useRef(new Map<number, Position>());
   const gesture = useRef<Gesture | null>(null);
   const drag = useRef<{ id: number; start: Position; view: View } | null>(null);
   const touchNavigation = useRef(false);
+  const lastTap = useRef<{ at: number; point: Position } | null>(null);
   const slide = fitSlide(size, props.room.width / props.room.height);
   const bounds = useRef({ size, slide }); bounds.current = { size, slide };
-  const apply = (next: View) => {
-    const bounded = constrainView(next, bounds.current.size, bounds.current.slide);
+  const apply = (next: View, elastic = false) => {
+    const result = elasticView(next, bounds.current.size, bounds.current.slide);
+    edgePull.current = elastic ? result.overflow : { x: 0, y: 0 };
+    if (elastic) setSettling(false);
+    const bounded = elastic ? result.view : constrainView(next, bounds.current.size, bounds.current.slide);
     current.current = bounded; setView(bounded);
+  };
+  const release = (cancel: boolean) => {
+    const step = cancel ? 0 : edgeSlideStep(edgePull.current, bounds.current.size);
+    setSettling(!!(edgePull.current.x || edgePull.current.y)); apply(current.current);
+    if (step && props.interactive) onSlideStep?.(step);
   };
   useEffect(() => {
     const element = host.current; if (!element) return;
@@ -42,7 +53,7 @@ export function SlideViewport({ controlsTarget, ...props }: Props) {
   useEffect(() => { apply(current.current); }, [size.width, size.height]);
   useEffect(() => {
     apply(fitView); pointers.current.clear(); gesture.current = null; drag.current = null;
-    touchNavigation.current = false; setDragging(false);
+    touchNavigation.current = false; setDragging(false); setSettling(false);
   }, [props.slide, props.room.id]);
   useEffect(() => {
     const element = host.current; if (!element) return;
@@ -50,6 +61,7 @@ export function SlideViewport({ controlsTarget, ...props }: Props) {
       if (!e.ctrlKey && !e.metaKey && current.current.scale <= 1) return;
       e.preventDefault();
       if (input.current?.isDrawing()) return;
+      setSettling(false);
       const rect = element.getBoundingClientRect();
       const factor = e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? rect.height : 1;
       const dx = e.deltaX * factor, dy = e.deltaY * factor;
@@ -71,16 +83,17 @@ export function SlideViewport({ controlsTarget, ...props }: Props) {
     const rect = host.current!.getBoundingClientRect();
     return { x: e.clientX - rect.left - rect.width / 2, y: e.clientY - rect.top - rect.height / 2 };
   };
-  const beginGesture = () => {
+  const beginGesture = (pinching = false) => {
     const points = [...pointers.current.values()];
-    gesture.current = { view: { ...current.current }, points: points.slice(0, 2) };
+    gesture.current = { view: { ...current.current }, points: points.slice(0, 2), pinching };
     touchNavigation.current = true; setDragging(true);
   };
   const down = (e: PointerEvent<HTMLDivElement>) => {
     if ((e.target as HTMLElement).closest('.viewport-controls')) return;
+    setSettling(false);
     if (e.pointerType === 'pen') {
       input.current?.cancelTouchStroke(); pointers.current.clear(); gesture.current = null;
-      touchNavigation.current = false; drag.current = null; setDragging(false);
+      touchNavigation.current = false; drag.current = null; setDragging(false); release(true);
       return;
     }
     if (e.pointerType === 'touch') {
@@ -106,11 +119,14 @@ export function SlideViewport({ controlsTarget, ...props }: Props) {
       if (!touchNavigation.current || !start) return;
       e.preventDefault(); e.stopPropagation();
       const points = [...pointers.current.values()];
-      if (points.length >= 2 && start.points.length >= 2) apply(pinchView(start.view, start.points[0], start.points[1], points[0], points[1]));
-      else if (points.length === 1) apply({ ...start.view, x: start.view.x + points[0].x - start.points[0].x, y: start.view.y + points[0].y - start.points[0].y });
+      if (points.length >= 2 && start.points.length >= 2) {
+        const next = pinchView(start.view, start.points[0], start.points[1], points[0], points[1]);
+        if (Math.abs(next.scale / start.view.scale - 1) > .03) start.pinching = true;
+        apply(next, !start.pinching);
+      } else if (points.length === 1) apply({ ...start.view, x: start.view.x + points[0].x - start.points[0].x, y: start.view.y + points[0].y - start.points[0].y }, !start.pinching);
     } else if (drag.current?.id === e.pointerId) {
       e.preventDefault(); e.stopPropagation(); const p = position(e), start = drag.current;
-      apply({ ...start.view, x: start.view.x + p.x - start.start.x, y: start.view.y + p.y - start.start.y });
+      apply({ ...start.view, x: start.view.x + p.x - start.start.x, y: start.view.y + p.y - start.start.y }, true);
     }
   };
   const up = (e: PointerEvent<HTMLDivElement>) => {
@@ -118,19 +134,37 @@ export function SlideViewport({ controlsTarget, ...props }: Props) {
       pointers.current.delete(e.pointerId);
       if (touchNavigation.current) {
         e.preventDefault(); e.stopPropagation();
-        if (pointers.current.size) beginGesture();
-        else { touchNavigation.current = false; gesture.current = null; setDragging(false); }
+        if (pointers.current.size) {
+          beginGesture(gesture.current?.pinching);
+        } else {
+          const now = performance.now();
+          const point = position(e);
+          const previous = lastTap.current;
+          const isDoubleTap = e.type === 'pointerup' && previous
+            && now - previous.at < 350
+            && Math.hypot(point.x - previous.point.x, point.y - previous.point.y) < 32;
+          lastTap.current = isDoubleTap ? null : { at: now, point };
+          touchNavigation.current = false;
+          gesture.current = null;
+          setDragging(false);
+          release(e.type !== 'pointerup');
+          if (isDoubleTap) {
+            apply(fitView);
+            setSettling(false);
+          }
+        }
         if (e.currentTarget.hasPointerCapture(e.pointerId)) e.currentTarget.releasePointerCapture(e.pointerId);
       }
     } else if (drag.current?.id === e.pointerId) {
-      drag.current = null; setDragging(false); e.preventDefault(); e.stopPropagation();
+      drag.current = null; setDragging(false); release(e.type !== 'pointerup'); e.preventDefault(); e.stopPropagation();
       if (e.currentTarget.hasPointerCapture(e.pointerId)) e.currentTarget.releasePointerCapture(e.pointerId);
     }
   };
-  return <div ref={host} className={`slide-viewport ${hand ? 'hand-mode' : ''} ${dragging ? 'is-panning' : ''}`}
+  return <div ref={host} className={`slide-viewport ${hand ? 'hand-mode' : ''} ${dragging ? 'is-panning' : ''} ${settling ? 'is-settling' : ''}`}
     onPointerDownCapture={down} onPointerMoveCapture={move} onPointerUpCapture={up} onPointerCancelCapture={up}
+    onDoubleClick={() => apply(fitView)}
     onLostPointerCapture={e => { if (e.target === e.currentTarget) up(e); }}>
-    <div className="slide-fit" style={{ width: slide.width * view.scale, height: slide.height * view.scale, transform: `translate(-50%, -50%) translate(${view.x}px, ${view.y}px)` }}>
+    <div className="slide-fit" onTransitionEnd={e => { if (e.target === e.currentTarget && e.propertyName === 'transform') setSettling(false); }} style={{ width: slide.width * view.scale, height: slide.height * view.scale, transform: `translate(-50%, -50%) translate(${view.x}px, ${view.y}px)` }}>
       <SlideCanvas {...props} inputRef={input} renderScale={view.scale} renderX={view.x} renderY={view.y} interactive={props.interactive && !hand} />
     </div>
     {controlsTarget && createPortal(<div className="viewport-controls" aria-label="Slide zoom and pan" ref={menu}>

@@ -1,12 +1,13 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
-import { ArrowDownToLine, ArrowRight, Check, ChevronLeft, ChevronRight, CircleHelp, CircleX, Copy, Eraser, FileUp, Highlighter, Laptop, Link, LoaderCircle, Maximize2, Monitor, MonitorOff, MousePointer2, Pause, PenLine, Play, Plus, Redo2, RotateCcw, Settings2, Spline, ChevronDown, Tablet, Timer, Trash2, Undo2, Unplug, X, Minus, PanelRightClose, PanelRightOpen, MoveUpRight } from 'lucide-react';
+import { ArrowDownToLine, ArrowRight, Check, ChevronLeft, ChevronRight, CircleHelp, CircleX, Copy, Eraser, FileUp, Highlighter, Laptop, Link, LoaderCircle, Maximize2, Monitor, MonitorOff, MousePointer2, Pause, PenLine, Play, Plus, Redo2, RotateCcw, Settings2, Spline, Tablet, Timer, Trash2, Undo2, Unplug, X, Minus, PanelRightClose, PanelRightOpen, MoveUpRight } from 'lucide-react';
 import { QRCodeSVG } from 'qrcode.react';
 import { useRoom } from './useRoom';
 import { SlideCanvas } from './SlideCanvas';
 import { SlideViewport } from './SlideViewport';
 import { smoothingPresets, type SmoothingPreset } from './smoothing';
 import { StylusButtonSettings } from './StylusButtonSettings';
+import { ColorPicker } from './ColorPicker';
 import { loadStylusBinding, type StylusBinding } from './stylus';
 import { connectionAddress } from './connectionAddress';
 import { penLaunchLinks } from './androidLink';
@@ -16,6 +17,13 @@ import './toolbar.css';
 import './render.css';
 
 const colors = ['#e4594e', '#f3b64b', '#4077d1', '#7c5bc5', '#294e3e', '#ffffff'];
+function loadPalette(): string[] {
+  try {
+    const saved: unknown = JSON.parse(localStorage.getItem('inkstage-palette') ?? 'null');
+    if (Array.isArray(saved) && saved.length === colors.length && saved.every(c => typeof c === 'string' && /^#[0-9a-f]{6}$/i.test(c))) return saved;
+  } catch { /* Fall back to the initial palette when storage is unavailable. */ }
+  return [...colors];
+}
 // The Android activity owns fullscreen; WebView does not expose browser
 // fullscreen controls and is already immersive before this page renders.
 const nativePenClient = /\bInkstageNativePen\//.test(navigator.userAgent);
@@ -145,8 +153,9 @@ function Devices({ credentials, counts, close }: { credentials: Credentials; cou
   </Modal>;
 }
 
-function InkToolbar({ tool, setTool, color, setColor, width, setWidth, snap, setSnap, touch, setTouch, smoothing, setSmoothing, pressure, setPressure, stylusBinding, setStylusBinding, send, slide, disabled }: {
+function InkToolbar({ tool, setTool, color, setColor, width, setWidth, eraserWidth, setEraserWidth, snap, setSnap, touch, setTouch, smoothing, setSmoothing, pressure, setPressure, stylusBinding, setStylusBinding, send, slide, disabled }: {
   tool: Tool; setTool: (tool: Tool) => void; color: string; setColor: (c: string) => void; width: number; setWidth: (n: number) => void;
+  eraserWidth: number; setEraserWidth: (n: number) => void;
   snap: boolean; setSnap: (v: boolean) => void; touch: boolean; setTouch: (v: boolean) => void;
   smoothing: SmoothingPreset; setSmoothing: (v: SmoothingPreset) => void; pressure: number; setPressure: (v: number) => void;
   stylusBinding: StylusBinding; setStylusBinding: (v: StylusBinding) => void;
@@ -154,41 +163,64 @@ function InkToolbar({ tool, setTool, color, setColor, width, setWidth, snap, set
 }) {
   const [settings, setSettings] = useState(false);
   const [penOptions, setPenOptions] = useState(false);
+  const [eraserOptions, setEraserOptions] = useState(false);
   const penMenu = useRef<HTMLDivElement>(null);
+  const eraserMenu = useRef<HTMLDivElement>(null);
   const settingsMenu = useRef<HTMLDivElement>(null);
-  const colorPicker = useRef<HTMLInputElement>(null);
-  const swatches = colors.includes(color) ? colors : [...colors, color];
+  const [colorPicker, setColorPicker] = useState(false);
+  const [palette] = useState(() => {
+    const swatches = loadPalette();
+    return { swatches, selectedSlot: Math.max(0, swatches.indexOf(color)) };
+  });
+  const [swatches, setSwatches] = useState(palette.swatches);
+  const [selectedSlot, setSelectedSlot] = useState(palette.selectedSlot);
+  const saveColor = (next: string) => {
+    const palette = swatches.map((value, index) => index === selectedSlot ? next : value);
+    setSwatches(palette); setColor(next);
+    try { localStorage.setItem('inkstage-palette', JSON.stringify(palette)); } catch { /* Keep the current palette when storage is unavailable. */ }
+  };
   const openColorPicker = () => {
-    const picker = colorPicker.current;
-    if (!picker) return;
-    try { if (picker.showPicker) picker.showPicker(); else picker.click(); }
-    catch { picker.click(); }
+    setSettings(false); setPenOptions(false); setColorPicker(true);
   };
   useEffect(() => {
     const outside = (e: globalThis.PointerEvent) => {
       const target = e.target as HTMLElement;
       if (!penMenu.current?.contains(target)) setPenOptions(false);
+      if (!eraserMenu.current?.contains(target)) setEraserOptions(false);
       if (!settingsMenu.current?.contains(target) && !target.closest('.stylus-binding-dialog')) setSettings(false);
     };
-    const escape = (e: KeyboardEvent) => { if (e.key === 'Escape') { setPenOptions(false); setSettings(false); } };
+    const escape = (e: KeyboardEvent) => { if (e.key === 'Escape') { setPenOptions(false); setEraserOptions(false); setSettings(false); } };
     document.addEventListener('pointerdown', outside, true); document.addEventListener('keydown', escape);
     return () => { document.removeEventListener('pointerdown', outside, true); document.removeEventListener('keydown', escape); };
   }, []);
+  const togglePenOptions = () => {
+    setPenOptions(value => !value);
+    setEraserOptions(false);
+    setSettings(false);
+  };
+  const toggleEraserOptions = () => {
+    setEraserOptions(value => !value);
+    setPenOptions(false);
+    setSettings(false);
+  };
   return <div className="ink-toolbar">
     <div className="toolbar-group">{tools.map(({ key, label, shortcut, icon: Icon }) => key === 'pen' ? <div className="pen-control" ref={penMenu} key={key}>
-      <IconButton label="Pen (P)" onClick={() => setTool('pen')} active={tool === 'pen'} disabled={disabled}><PenLine size={21} /></IconButton>
+      <IconButton label="Pen (P), tap again for options" onClick={() => tool === 'pen' ? togglePenOptions() : setTool('pen')} active={tool === 'pen'} disabled={disabled}><PenLine size={21} /></IconButton>
       <IconButton label="Smoothed pen (S)" onClick={() => setTool('smooth-pen')} active={tool === 'smooth-pen'} disabled={disabled}><Spline size={21} /></IconButton>
-      <button className={`pen-menu-arrow ${penOptions ? 'selected' : ''}`} aria-label="Pen options" aria-expanded={penOptions} onClick={() => { setPenOptions(!penOptions); setSettings(false); }}><ChevronDown size={13} /></button>
-      {penOptions && <div className="pen-submenu" role="dialog" aria-label="Pen options">
+      {penOptions && <div className="pen-submenu" role="group" aria-label="Pen options">
         <strong>Pen settings</strong>
-        <span className="submenu-label">Smoothing</span><div className="smoothing-presets">{(Object.keys(smoothingPresets) as SmoothingPreset[]).map(preset => <button key={preset} aria-pressed={smoothing === preset} onClick={() => { setSmoothing(preset); setTool('smooth-pen'); }}>{smoothingPresets[preset].label}</button>)}</div>
+        <span className="submenu-label">Pen width</span><div className="width-presets" role="group" aria-label="Pen width presets">{[2, 4, 6, 9].map(preset => <button type="button" key={preset} aria-label={`${preset} pixel pen width`} aria-pressed={width === preset} onClick={() => setWidth(preset)}><span style={{ width: 5 + preset * 1.4, height: 5 + preset * 1.4 }} />{preset}</button>)}</div>
+        <span className="submenu-label">Smoothing</span><div className="smoothing-presets">{(Object.keys(smoothingPresets) as SmoothingPreset[]).map(preset => <button type="button" key={preset} aria-pressed={smoothing === preset} onClick={() => { setSmoothing(preset); setTool('smooth-pen'); }}>{smoothingPresets[preset].label}</button>)}</div>
         <label className="pressure-label">Pressure sensitivity<span>{pressure === 0 ? 'Off' : `${pressure}%`}</span><input className="tool-range" style={{ '--range-progress': `${pressure}%` } as React.CSSProperties} aria-label="Pressure sensitivity" type="range" min="0" max="100" step="5" value={pressure} onChange={e => setPressure(Number(e.target.value))} /></label>
         <small>Higher values vary the width more with stylus pressure. Set to 0 for an even stroke.</small>
       </div>}
+    </div> : key === 'eraser' ? <div className="pen-control eraser-control" ref={eraserMenu} key={key}>
+      <IconButton label="Eraser (E), tap again for options" onClick={() => tool === 'eraser' ? toggleEraserOptions() : setTool('eraser')} active={tool === 'eraser'} disabled={disabled}><Icon size={21} /></IconButton>
+      {eraserOptions && <div className="pen-submenu eraser-submenu" role="group" aria-label="Eraser options"><strong>Eraser size</strong><div className="width-presets eraser-width-presets" role="group" aria-label="Eraser size presets">{[16, 24, 36, 52].map(preset => <button type="button" key={preset} aria-label={`${preset} pixel eraser`} aria-pressed={eraserWidth === preset} onClick={() => setEraserWidth(preset)}><span style={{ width: Math.max(5, preset * .55), height: Math.max(5, preset * .55) }} />{preset}</button>)}</div><label className="eraser-size-label">Size <span>{eraserWidth} px</span><input className="tool-range" style={{ '--range-progress': `${(eraserWidth - 12) / 48 * 100}%` } as React.CSSProperties} aria-label="Eraser size" type="range" min="12" max="60" step="2" value={eraserWidth} onChange={e => setEraserWidth(Number(e.target.value))} /></label></div>}
     </div> : <IconButton key={key} label={`${label} (${shortcut})`} onClick={() => setTool(key)} active={tool === key} disabled={disabled}><Icon size={21} /></IconButton>)}</div><span className="toolbar-divider" />
-    <div className="toolbar-group colors">{swatches.map(c => <button className={`color-choice ${c === color ? 'selected' : ''}`} key={c} aria-label={c === color ? `Choose custom color, current ${c}` : `Ink ${c}`} aria-pressed={c === color} style={{ '--swatch': c } as React.CSSProperties} onClick={() => c === color ? openColorPicker() : setColor(c)}><span />{c === color && <Check size={12} color={c.toLowerCase() === '#ffffff' ? '#173e33' : 'white'} />}</button>)}<input ref={colorPicker} className="color-picker-input" type="color" value={color} aria-label="Choose ink color" onChange={e => setColor(e.currentTarget.value)} /></div><span className="toolbar-divider" />
+    <div className="toolbar-group colors">{swatches.map((c, index) => <button className={`color-choice ${index === selectedSlot ? 'selected' : ''}`} key={index} aria-label={index === selectedSlot ? `Edit color preset ${index + 1}, current ${c}` : `Ink ${c}`} aria-pressed={index === selectedSlot} style={{ '--swatch': c } as React.CSSProperties} onClick={() => { if (index === selectedSlot) openColorPicker(); else { setSelectedSlot(index); setColor(c); } }}><span />{index === selectedSlot && <Check size={12} color={c.toLowerCase() === '#ffffff' ? '#173e33' : 'white'} />}</button>)}</div>{colorPicker && <ColorPicker color={color} onChange={saveColor} close={() => setColorPicker(false)} />}<span className="toolbar-divider" />
     <div className="toolbar-group history"><IconButton label="Undo ink (Ctrl+Z)" onClick={() => send({ type: 'undo', slide })} disabled={disabled}><Undo2 size={19} /></IconButton><IconButton label="Redo ink (Ctrl+Shift+Z)" onClick={() => send({ type: 'redo', slide })} disabled={disabled}><Redo2 size={19} /></IconButton></div>
-    <div className="settings-wrap" ref={settingsMenu}><IconButton label="Tool settings" onClick={() => { setSettings(!settings); setPenOptions(false); }} active={settings}><Settings2 size={19} /></IconButton>{settings && <div className="pen-settings"><strong>Tool settings</strong><label>Stroke width <span>{width} px</span><input className="tool-range" style={{ '--range-progress': `${(width - 2) / 8 * 100}%` } as React.CSSProperties} type="range" min="2" max="10" step="1" value={width} onChange={e => setWidth(Number(e.target.value))} /></label><label className="switch-label"><span>Snap line angles<small>Near 0°, 45°, and 90°</small></span><input type="checkbox" checked={snap} onChange={e => setSnap(e.target.checked)} /></label><label className="switch-label"><span>Draw with a finger<small>Turn off for palm rejection</small></span><input type="checkbox" checked={touch} onChange={e => setTouch(e.target.checked)} /></label><StylusButtonSettings binding={stylusBinding} onChange={setStylusBinding} /><p>Hold still for 0.55 s to straighten a stroke. Stylus side and eraser buttons erase strokes.</p><button className="danger-button" disabled={disabled} onClick={() => { send({ type: 'clear', slide }); setSettings(false); }}><Trash2 size={15} /> Clear ink on this slide</button><small>You can undo this.</small></div>}</div>
+    <div className="settings-wrap" ref={settingsMenu}><IconButton label="Tool settings" onClick={() => { setSettings(!settings); setPenOptions(false); setEraserOptions(false); }} active={settings}><Settings2 size={19} /></IconButton>{settings && <div className="pen-settings"><strong>Tool settings</strong><label>Stroke width <span>{width} px</span><input className="tool-range" style={{ '--range-progress': `${(width - 2) / 8 * 100}%` } as React.CSSProperties} type="range" min="2" max="10" step="1" value={width} onChange={e => setWidth(Number(e.target.value))} /></label><label className="switch-label"><span>Snap line angles<small>Near 0°, 45°, and 90°</small></span><input type="checkbox" checked={snap} onChange={e => setSnap(e.target.checked)} /></label><label className="switch-label"><span>Draw with a finger<small>Turn off for palm rejection</small></span><input type="checkbox" checked={touch} onChange={e => setTouch(e.target.checked)} /></label><StylusButtonSettings binding={stylusBinding} onChange={setStylusBinding} /><p>Hold still for 0.55 s to straighten a stroke. Stylus side and eraser buttons erase strokes.</p><button className="danger-button" disabled={disabled} onClick={() => { send({ type: 'clear', slide }); setSettings(false); }}><Trash2 size={15} /> Clear ink on this slide</button><small>You can undo this.</small></div>}</div>
   </div>;
 }
 
@@ -202,13 +234,14 @@ function Clock({ room, send }: { room: Room; send: (op: Operation) => boolean })
 
 function Session({ credentials, home }: { credentials: Credentials; home: () => void }) {
   const { room, connected, counts, latency, error, setError, send, flush, laser } = useRoom(credentials);
-  const [tool, setTool] = useState<Tool>('pen'), [color, setColor] = useState(colors[0]), [width, setWidth] = useState(4);
+  const [tool, setTool] = useState<Tool>('pen'), [color, setColor] = useState(() => loadPalette()[0]), [width, setWidth] = useState(4);
+  const [eraserWidth, setEraserWidth] = useState(() => { const saved = Number(localStorage.getItem('inkstage-eraser-width')); return Number.isFinite(saved) && saved >= 12 && saved <= 60 ? saved : 32; });
   const [smoothing, setSmoothing] = useState<SmoothingPreset>(() => { const stored = localStorage.getItem('inkstage-smoothing'); return stored && stored in smoothingPresets ? stored as SmoothingPreset : 'balanced'; });
   const [pressure, setPressure] = useState(() => { const stored = localStorage.getItem('inkstage-pressure'); return stored === null ? 60 : Math.max(0, Math.min(100, Number(stored) || 0)); });
   const [stylusBinding, setStylusBinding] = useState<StylusBinding>(loadStylusBinding);
   useEffect(() => { localStorage.setItem('inkstage-stylus-button', JSON.stringify(stylusBinding)); }, [stylusBinding]);
   const [viewportControls, setViewportControls] = useState<HTMLDivElement | null>(null);
-  useEffect(() => { localStorage.setItem('inkstage-smoothing', smoothing); localStorage.setItem('inkstage-pressure', String(pressure)); }, [smoothing, pressure]);
+  useEffect(() => { localStorage.setItem('inkstage-smoothing', smoothing); localStorage.setItem('inkstage-pressure', String(pressure)); localStorage.setItem('inkstage-eraser-width', String(eraserWidth)); }, [smoothing, pressure, eraserWidth]);
   const [snap, setSnap] = useState(true), [touch, setTouch] = useState(credentials.role !== 'pen');
   const [devices, setDevices] = useState(false), [help, setHelp] = useState(false), [notes, setNotes] = useState(true), [exporting, setExporting] = useState(false), [exported, setExported] = useState(false);
   const audience = credentials.role === 'audience', tablet = credentials.role === 'pen';
@@ -264,7 +297,7 @@ function Session({ credentials, home }: { credentials: Credentials; home: () => 
     finally { setExporting(false); }
   }
   if (!room) return <div className="loading-screen"><span className="view-label">{tablet ? 'Pen view' : audience ? 'Audience view' : 'Presenter view'}</span><LoaderCircle className="spin" size={30} /><p>{error || 'Connecting…'}</p><button className="secondary-button" onClick={home}>Back to start</button></div>;
-  const canvasProps = { room, slide: room.current, credentials, interactive: connected && !audience, tool, color, width, touch, snap, smoothing, pressure, stylusBinding, send, laser };
+  const canvasProps = { room, slide: room.current, credentials, interactive: connected && !audience, tool, color, width, eraserWidth, touch, snap, smoothing, pressure, stylusBinding, send, laser };
   if (audience) return <main className="audience-view" style={{ '--aspect': room.width / room.height } as React.CSSProperties} onDoubleClick={() => void fullscreen()} title="Press F or double-click for fullscreen">
     {!room.blackout && <SlideCanvas {...canvasProps} />}
     {!connected && <div className="audience-disconnected"><Unplug size={15} /> Connection lost. Waiting for the presenter.</div>}
@@ -277,10 +310,10 @@ function Session({ credentials, home }: { credentials: Credentials; home: () => 
       {!tablet && <aside className="slide-rail"><div className="rail-heading"><span>SLIDES</span><span>{room.slides.length.toString().padStart(2, '0')}</span></div><nav aria-label="Slides">{room.slides.map((slide, i) => <button key={i} className={`slide-thumbnail ${room.current === i ? 'current' : ''}`} onClick={() => navigate(i)} disabled={!connected} aria-label={`Slide ${i + 1}: ${slide.title}`} aria-current={room.current === i ? 'step' : undefined}><div><SlideCanvas room={room} slide={i} credentials={credentials} preview /></div><span className="thumbnail-caption"><span>{(i + 1).toString().padStart(2, '0')}</span><span>{slide.title}</span>{(room.strokes[i]?.length ?? 0) > 0 && <PenLine size={12} />}</span></button>)}</nav><button className="rail-help" onClick={() => setHelp(true)}><CircleHelp size={17} /> Tips & shortcuts</button></aside>}
       <main className="stage">
         {room.blackout && <span className="canvas-blackout-indicator">Audience blacked out</span>}
-        <div className="stage-slide"><SlideViewport {...canvasProps} controlsTarget={viewportControls} /></div>
+        <div className="stage-slide"><SlideViewport {...canvasProps} controlsTarget={viewportControls} onSlideStep={step => navigate(room.current + step)} /></div>
         <div className="toolbar-area"><div className="unified-toolbar" aria-label="Presentation tools">
           <div className="slide-navigation"><IconButton label="Previous slide" disabled={!connected || room.current === 0} onClick={() => navigate(room.current - 1)}><ChevronLeft size={25} /></IconButton><span>{String(room.current + 1).padStart(2, '0')}<i>/</i>{String(room.slides.length).padStart(2, '0')}</span><IconButton label="Next slide" disabled={!connected || room.current === room.slides.length - 1} onClick={() => navigate(room.current + 1)}><ChevronRight size={25} /></IconButton></div>
-          <InkToolbar {...{ tool, setTool, color, setColor, width, setWidth, snap, setSnap, touch, setTouch, smoothing, setSmoothing, pressure, setPressure, stylusBinding, setStylusBinding, send }} slide={room.current} disabled={!connected} />
+          <InkToolbar {...{ tool, setTool, color, setColor, width, setWidth, eraserWidth, setEraserWidth, snap, setSnap, touch, setTouch, smoothing, setSmoothing, pressure, setPressure, stylusBinding, setStylusBinding, send }} slide={room.current} disabled={!connected} />
           <div className="view-tools"><div ref={setViewportControls} className="viewport-tools-slot" /></div>
         </div></div>
       </main>

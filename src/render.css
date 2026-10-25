@@ -11,3 +11,7 @@
 .pdf-loading { position: absolute; top: 35px; left: 50%; transform: translateX(-50%); padding: 7px 12px; border-radius: 6px; background: #fcfdf8e6; color: #6f8661; font-size: 11px; line-height: 1.5; pointer-events: none; }
 .header-actions .presenter-tools > .icon-button { width: 30px; min-width: 30px; height: 30px; }
 .slide-fit { will-change: auto; }
+.slide-viewport.is-settling .slide-fit { transition: transform 420ms cubic-bezier(.2,1.35,.4,1); }
+@media(prefers-reduced-motion:reduce){.slide-viewport.is-settling .slide-fit{transition:none}}
+.eraser-cursor{position:absolute;z-index:2;transform:translate(-50%,-50%);border:1.5px solid #173e33;border-radius:50%;background:#ffffff38;box-shadow:0 0 0 1px #fff9;pointer-events:none}
+.slide-canvas.tool-eraser > .ink-input { cursor: none; }

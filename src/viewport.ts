@@ -2,19 +2,43 @@ export type View = { scale: number; x: number; y: number };
 export type Size = { width: number; height: number };
 export type Position = { x: number; y: number };
 export const fitView: View = { scale: 1, x: 0, y: 0 };
+
 export function fitSlide(size: Size, aspect: number): Size {
   const width = Math.min(size.width, size.height * aspect);
   return { width, height: width / aspect };
 }
+
 export function constrainView(view: View, viewport: Size, slide: Size): View {
   const scale = Math.max(.5, Math.min(6, view.scale));
-  // Keep a full half-page of pan room at fit size too, so hand mode can
-  // reposition the slide without requiring a zoom first.
-  const marginX = scale >= 1 ? Math.min(viewport.width, slide.width * scale) / 2 : 0;
-  const marginY = scale >= 1 ? Math.min(viewport.height, slide.height * scale) / 2 : 0;
+  const marginX = scale > 1 ? Math.min(viewport.width, slide.width * scale) / 2 : 0;
+  const marginY = scale > 1 ? Math.min(viewport.height, slide.height * scale) / 2 : 0;
   const maxX = Math.max(0, (slide.width * scale - viewport.width) / 2) + marginX;
   const maxY = Math.max(0, (slide.height * scale - viewport.height) / 2) + marginY;
   return { scale, x: Math.max(-maxX, Math.min(maxX, view.x)), y: Math.max(-maxY, Math.min(maxY, view.y)) };
+}
+
+function spring(distance: number, dimension: number): number {
+  const limit = Math.max(1, dimension * .18);
+  return Math.sign(distance) * limit * (1 - Math.exp(-Math.abs(distance) / (limit * 2)));
+}
+
+export function elasticView(view: View, viewport: Size, slide: Size): { view: View; overflow: Position } {
+  const bounded = constrainView(view, viewport, slide);
+  const overflow = { x: view.x - bounded.x, y: view.y - bounded.y };
+  return {
+    view: {
+      ...bounded,
+      x: bounded.x + spring(overflow.x, viewport.width),
+      y: bounded.y + spring(overflow.y, viewport.height),
+    },
+    overflow,
+  };
+}
+
+export function edgeSlideStep(overflow: Position, viewport: Size): -1 | 0 | 1 {
+  const x = overflow.x / Math.max(1, viewport.width), y = overflow.y / Math.max(1, viewport.height);
+  const pull = Math.abs(x) >= Math.abs(y) ? x : y;
+  return Math.abs(pull) >= .22 ? pull < 0 ? 1 : -1 : 0;
 }
 // Anchor is measured in viewport pixels from its center. Preserve the slide
 // coordinate beneath it while the scale changes, before applying edge bounds.
