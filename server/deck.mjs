@@ -4,7 +4,8 @@ import path from 'node:path';
 import { readFile, mkdir, stat, rename } from 'node:fs/promises';
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { pressureOutline } from '../shared/pressure.mjs';
+import { pressureJoins, pressureOutline } from '../shared/pressure.mjs';
+import { flattenInkOutline } from './inkGeometry.mjs';
 
 const parser = new XMLParser({ ignoreAttributes: false, attributeNamePrefix: '@_', removeNSPrefix: true, processEntities: false });
 const list = value => value == null ? [] : Array.isArray(value) ? value : [value];
@@ -131,15 +132,33 @@ export async function exportDeck(buffer, metadata, strokes) {
     let nextId = Math.max(1, ...Array.from(source.matchAll(/\bid="(\d+)"/g), m => Number(m[1]))) + 1;
     const shapes = ink.filter(s => s.points.length).map(stroke => {
       const outline = pressureOutline(stroke, metadata.width / metadata.height);
-      let points = (outline ?? stroke.points).map(point => ({ x: Math.round(point.x * metadata.width), y: Math.round(point.y * metadata.height) }));
-      if (points.length === 1) points = [points[0], { x: points[0].x + 1, y: points[0].y + 1 }];
-      const commands = points.map((point, i) => `<${a}:${i ? 'lnTo' : 'moveTo'}><${a}:pt x="${point.x}" y="${point.y}"/></${a}:${i ? 'lnTo' : 'moveTo'}>`).join('') + (outline ? `<${a}:close/>` : '');
+      const geometryPath = (commands, filled) => `<${a}:path w="${metadata.width}" h="${metadata.height}" fill="${filled ? 'norm' : 'none'}" stroke="${filled ? '0' : '1'}">${commands}</${a}:path>`;
+      const pointCommands = points => points.map((point, i) => `<${a}:${i ? 'lnTo' : 'moveTo'}><${a}:pt x="${point.x}" y="${point.y}"/></${a}:${i ? 'lnTo' : 'moveTo'}>`).join('');
+      let bodyPaths;
+      if (outline) {
+        bodyPaths = flattenInkOutline(outline).map(polygon => geometryPath(polygon.map(ring => {
+          const points = ring.map(([x, y]) => ({ x: Math.round(x * metadata.width), y: Math.round(y * metadata.height) }));
+          return pointCommands(points) + `<${a}:close/>`;
+        }).join(''), true)).join('');
+      } else {
+        let points = stroke.points.map(point => ({ x: Math.round(point.x * metadata.width), y: Math.round(point.y * metadata.height) }));
+        if (points.length === 1) points = [points[0], { x: points[0].x + 1, y: points[0].y + 1 }];
+        bodyPaths = geometryPath(pointCommands(points), false);
+      }
+      const joinPaths = outline ? pressureJoins(stroke, metadata.width / metadata.height).map(join => {
+        const cx = join.x * metadata.width, cy = join.y * metadata.height, radius = join.radius / 1600 * metadata.width;
+        const pt = (x, y) => `<${a}:pt x="${Math.round(cx + x * radius)}" y="${Math.round(cy + y * radius)}"/>`;
+        const k = .5522847498;
+        const curves = [[1, k, k, 1, 0, 1], [-k, 1, -1, k, -1, 0], [-1, -k, -k, -1, 0, -1], [k, -1, 1, -k, 1, 0]];
+        const disk = `<${a}:moveTo>${pt(1, 0)}</${a}:moveTo>` + curves.map(c => `<${a}:cubicBezTo>${pt(c[0], c[1])}${pt(c[2], c[3])}${pt(c[4], c[5])}</${a}:cubicBezTo>`).join('') + `<${a}:close/>`;
+        return geometryPath(disk, true);
+      }).join('') : '';
       const color = stroke.color.replace('#', '').toUpperCase();
       const alpha = stroke.tool === 'highlighter' ? 30000 : 100000;
       const lineWidth = Math.round(stroke.width / 1600 * metadata.width);
       const fill = `<${a}:solidFill><${a}:srgbClr val="${color}"><${a}:alpha val="${alpha}"/></${a}:srgbClr></${a}:solidFill>`;
       const style = outline ? `${fill}<${a}:ln><${a}:noFill/></${a}:ln>` : `<${a}:noFill/><${a}:ln w="${lineWidth}" cap="rnd" cmpd="sng">${fill}<${a}:prstDash val="solid"/><${a}:round/><${a}:headEnd type="none"/><${a}:tailEnd type="none"/></${a}:ln>`;
-      return `<${p}:sp><${p}:nvSpPr><${p}:cNvPr id="${nextId++}" name="Inkstage ${stroke.tool}"/><${p}:cNvSpPr/><${p}:nvPr/></${p}:nvSpPr><${p}:spPr><${a}:xfrm><${a}:off x="0" y="0"/><${a}:ext cx="${metadata.width}" cy="${metadata.height}"/></${a}:xfrm><${a}:custGeom><${a}:avLst/><${a}:gdLst/><${a}:ahLst/><${a}:cxnLst/><${a}:rect l="0" t="0" r="r" b="b"/><${a}:pathLst><${a}:path w="${metadata.width}" h="${metadata.height}" fill="${outline ? 'norm' : 'none'}" stroke="${outline ? '0' : '1'}">${commands}</${a}:path></${a}:pathLst></${a}:custGeom>${style}</${p}:spPr></${p}:sp>`;
+      return `<${p}:sp><${p}:nvSpPr><${p}:cNvPr id="${nextId++}" name="Inkstage ${stroke.tool}"/><${p}:cNvSpPr/><${p}:nvPr/></${p}:nvSpPr><${p}:spPr><${a}:xfrm><${a}:off x="0" y="0"/><${a}:ext cx="${metadata.width}" cy="${metadata.height}"/></${a}:xfrm><${a}:custGeom><${a}:avLst/><${a}:gdLst/><${a}:ahLst/><${a}:cxnLst/><${a}:rect l="0" t="0" r="r" b="b"/><${a}:pathLst>${bodyPaths}${joinPaths}</${a}:pathLst></${a}:custGeom>${style}</${p}:spPr></${p}:sp>`;
     }).join('');
     source = source.replace(`</${p}:spTree>`, `${shapes}</${p}:spTree>`);
     zip.file(slide.part, source);

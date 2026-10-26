@@ -34,15 +34,32 @@ export class RoomReplica {
     for (const event of events) this.pending.set(event.op as string, event);
     for (const event of mergePointEvents(events)) this.room = updateRoom(this.room, event);
   }
+  remoteBatch(events: Operation[]) {
+    let points: Operation[] = [];
+    const flush = () => {
+      if (this.room) for (const event of mergePointEvents(points)) this.room = updateRoom(this.room, event);
+      points = [];
+    };
+    for (const event of events) {
+      if (event.type === 'stroke-points') {
+        // Consume every acknowledgement before merging. A merged message has
+        // only one op ID, so reconciliation must see the original messages.
+        if (!this.pending.delete(event.op as string)) points.push(event);
+      } else {
+        flush();
+        this.remote(event);
+      }
+    }
+    flush();
+  }
   remote(event: Operation) {
     if (!this.room) return;
     const own = this.pending.delete(event.op as string);
     if (own && event.type.startsWith('stroke-')) return;
     this.room = updateRoom(this.room, event);
     if (event.type === 'ink-state') {
-      for (const edit of this.pending.values()) {
-        if (edit.slide === event.slide) this.room = updateRoom(this.room, edit);
-      }
+      const edits = [...this.pending.values()].filter(edit => edit.slide === event.slide);
+      for (const edit of mergePointEvents(edits)) this.room = updateRoom(this.room, edit);
     }
   }
 }
@@ -55,6 +72,7 @@ export function mergePointEvents(events: Operation[]): Operation[] {
     const last = result[result.length - 1];
     if (event.type === 'stroke-points' && last?.type === event.type && last.id === event.id && last.slide === event.slide) {
       (last.points as Point[]).push(...event.points as Point[]);
+      if (typeof event.revision === 'number') last.revision = event.revision;
     } else result.push(event.type === 'stroke-points' ? { ...event, points: [...event.points as Point[]] } : { ...event });
   }
   return result;

@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type PointerEvent } from 'react';
 import { X } from 'lucide-react';
+import { suppressDismissGesture } from './dismissGesture';
 import './colorPicker.css';
 
 type HSV = { h: number; s: number; v: number };
@@ -68,7 +69,7 @@ export function ColorPicker({ color, onChange, close }: Props) {
   return <dialog ref={dialog} className="ink-color-dialog" aria-labelledby="ink-color-title" onCancel={close} onPointerDown={e => {
     if (e.target !== e.currentTarget) return;
     const r = e.currentTarget.getBoundingClientRect();
-    if (e.clientX < r.left || e.clientX > r.right || e.clientY < r.top || e.clientY > r.bottom) close();
+    if (e.clientX < r.left || e.clientX > r.right || e.clientY < r.top || e.clientY > r.bottom) { suppressDismissGesture(e); close(); }
   }}>
     <header>
       <h2 id="ink-color-title">Color</h2>

@@ -23,7 +23,11 @@ export function useRoom(credentials: Credentials | null) {
         const batch: Operation[] = [];
         while (i < events.length && events[i].local) batch.push(events[i++].event);
         replica.current.localBatch(batch);
-      } else replica.current.remote(events[i++].event);
+      } else {
+        const batch: Operation[] = [];
+        while (i < events.length && !events[i].local) batch.push(events[i++].event);
+        replica.current.remoteBatch(batch);
+      }
     }
     setRoom(replica.current.room);
   }, []);

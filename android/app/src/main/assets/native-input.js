@@ -1,6 +1,8 @@
 (() => {
-  if (window.InkstageNativePen) return;
+  if (typeof navigator !== 'undefined' && !/\bInkstageNativePen\//.test(navigator.userAgent)) return;
+  if (window.InkstageNativePen?.version >= 2) return;
   let active = null, lastPenTime = -Infinity;
+  let suppressContact = false, hover = null;
   const previous = new Map();
   const surface = node => node?.closest?.('.ink-input, .button-learn-pad');
   // Keep native Android samples as the sole pen input on drawing/test surfaces.
@@ -38,14 +40,26 @@
       if (!packet.width || !packet.height || !packet.points?.length) continue;
       const points = packet.points.map(p => ({ x: p.x * innerWidth / packet.width, y: p.y * innerHeight / packet.height, pressure: p.pressure, time: p.time }));
       const last = points[points.length - 1];
+      if (packet.action === 'cancel' || suppressContact) {
+        if (packet.action === 'cancel' || packet.action === 'up' || !packet.contact) {
+          const target = active?.target ?? hover?.target ?? surface(document.elementFromPoint(last.x, last.y));
+          if (target?.isConnected) emit(target, packet.action === 'up' ? 'pointerup' : 'pointercancel', packet, [last], 0);
+          active = null; hover = null; suppressContact = false; previous.delete(2000 + packet.id);
+        }
+        continue;
+      }
       let target = active?.target ?? surface(document.elementFromPoint(last.x, last.y));
-      if (!target) continue;
+      if (!target) {
+        if (hover?.target.isConnected) emit(hover.target, 'pointerout', hover.packet, [hover.point], 0);
+        hover = null; continue;
+      }
       if (!target.isConnected) { active = null; continue; }
       if (packet.action === 'down' || (packet.contact && !active && packet.action === 'move')) {
         active = { target, packet, point: points[0] };
         emit(target, 'pointerdown', packet, [points[0]], packet.buttons);
       }
       if (packet.action === 'move' || packet.action === 'hover') emit(target, 'pointermove', packet, points, packet.buttons);
+      if (packet.action === 'hover') hover = { target, packet, point: last };
       if (packet.action === 'up' || packet.action === 'cancel') {
         if (active) emit(target, packet.action === 'cancel' ? 'pointercancel' : 'pointerup', packet, [last], 0);
         active = null; previous.delete(2000 + packet.id);
@@ -53,11 +67,11 @@
     }
   }
   const cancel = () => {
-    if (!active) return;
-    emit(active.target, 'pointercancel', active.packet, [active.point], 0);
-    active = null; previous.clear();
+    const last = active ?? hover;
+    if (last) emit(last.target, 'pointercancel', last.packet, [last.point], 0);
+    active = null; hover = null; suppressContact = false; previous.clear();
   };
   window.addEventListener('blur', cancel);
   document.addEventListener('visibilitychange', () => { if (document.hidden) cancel(); });
-  window.InkstageNativePen = Object.freeze({ accept, cancel });
+  window.InkstageNativePen = Object.freeze({ version: 2, accept, cancel, suppressUntilLift: () => { suppressContact = true; } });
 })();

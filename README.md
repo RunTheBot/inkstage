@@ -49,7 +49,7 @@ In **Connect devices**, choose **Custom domain / IP…** under Laptop network ad
 
 ### Zoom and move the slide
 
-The pen canvas occupies the whole viewport. Its small view label and unified bottom toolbar overlay the canvas. The same bottom toolbar appears in pen and presenter views: navigation, drawing tools, color controls, undo/redo, settings, pan and zoom. Icon buttons and color touch targets are consistently 48 by 48 pixels. It wraps when space is limited. Presenter-only blackout and notes controls are in the header.
+The pen canvas occupies the whole viewport. Pen and presenter views share a floating toolbar with grouped drawing tools, navigation, undo/redo, settings, and pan/zoom. A smaller strip above it gives direct access to three widths, the current width menu, and saved colors. Drawing tools stay on the main bar, including smoothed pen. Tap an active tool again for its options. Selecting a drawing tool leaves pan mode. Tapping outside a popup dismisses it without drawing on the slide; the close button and Escape also dismiss it. The layout adapts to narrower screens. Presenter-only blackout and notes controls remain in the header.
 
 Pinch with two fingers on a touchscreen or trackpad to zoom. Drag with two fingers on a touchscreen, or scroll with two fingers on a trackpad, to move the page when zoomed. With finger drawing turned off, a single finger also pans. Use Ctrl+mouse-wheel to zoom around the cursor. The hand button (or **M**) enables dragging with a mouse, and a middle-button drag also pans. Open the percentage-arrow submenu for **+ / −** controls (50%–600%) and **Fit slide**. Changing slides resets the view to fit.
 
@@ -60,14 +60,14 @@ of the screen, with blank space around it for comfortable writing. Panning
 stops while part of the slide remains visible. **Fit slide** recenters it.
 
 - **Pen:** freehand ink. Pause within about 5 screen pixels for **550 ms** at the end of a stroke to straighten it. Continue dragging to adjust the straight line before lifting the pen.
-- **Smoothed pen:** choose the dedicated smoothed-pen button on the main toolbar (or press **S**). Open the adjacent arrow to select **Light**, **Balanced**, **Strong**, or **Maximum** smoothing. Balanced and Strong use two stabilization passes, and Maximum uses three for much stronger filtering. Stronger settings add more pen lag. Adaptive filtering reduces hand jitter while responding faster to quick movements. The filtered points stream to every view and are retained in the exported PPTX. The regular pen remains available for unfiltered input. Both modes support hold-to-straighten.
-- **Pressure sensitivity:** the same pen submenu contains a 0–100% slider. Higher values increase how much stylus pressure changes stroke width; 0 gives a uniform stroke. This uses the pressure reported by the pen/browser. Mouse and finger input keep a uniform width. Pressure outlines use the same geometry for local display, other connected views, and editable PPTX export. Smoothing and pressure preferences are remembered in the browser.
+- **Smoothed pen:** choose the dedicated toolbar button or press **S**. Open the pen options for **Light**, **Balanced**, **Strong**, or **Maximum**. One adaptive filter reduces jitter while keeping its trailing distance within 1.2, 2, 2.8, or 3.5 visible pixels respectively. These are filter distances, not guarantees about device or network latency. The filtered points stream to every view and remain in the exported PPTX. Both pen modes support hold-to-straighten.
+- **Pressure sensitivity:** pen options contain a 0–100% sensitivity slider and a 0–15% pressure deadzone, initially 3%. Pressure-sensitive strokes begin above the deadzone; pressure is normalized over the remaining range and lightly filtered. A small spatial filter also stabilizes width in the vector renderer. Mouse, finger, and zero-sensitivity strokes have uniform width. Preferences are remembered in the browser.
 - **Line:** drag to draw a straight line directly.
 - **Angle snap:** lines within **8°** of horizontal, vertical, or a 45° angle snap to that angle. The calculation respects the slide's aspect ratio. Toggle this in pen settings.
-- **Eraser:** tap or sweep across ink to erase entire strokes. Undo restores them. The physical pen button is checked throughout contact, so pressing and releasing it mid-stroke temporarily switches between your selected pen and erasing. A side-button press while hovering does not erase until the tip touches the page.
-- **Highlighter:** translucent strokes.
+- **Eraser:** sweep across ink to erase entire strokes. The full sampled path is checked, including intermediate samples in fast curves. Tap the selected eraser for its size slider and preview; the cursor shows its current size. A stylus button selects erasing at stroke start and keeps that choice until lift-off. Rebinding is under **Tool settings**. Undo restores erased strokes.
+- **Highlighter:** translucent strokes with hold-to-straighten and angle snapping. Repeated strokes of the same color share one opacity layer; multiply blending preserves black text.
 - **Laser:** temporary pointer, excluded from export. Remote pointers disappear after inactivity.
-- Pen settings include stroke width, angle snapping, finger drawing, and clearing ink on the current slide. Clear is undoable.
+- **Pen width:** tap the selected pen for a slider from 1 to 12 px, with half-pixel steps and a live stroke preview. Three quick widths and the current width menu are available above the main toolbar. Width is remembered in the browser. Tool settings include angle snapping, finger drawing, stylus rebinding, and clearing the current slide. Clear is undoable.
 
 | Key | Action |
 | --- | --- |

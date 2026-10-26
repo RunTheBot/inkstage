@@ -29,3 +29,18 @@ export function hitStrokes(strokes: Stroke[], point: Point, previous: Point | nu
   })).map(s => s.id);
 }
 
+export function hitStrokesAlongPath(strokes: Stroke[], samples: Point[], previous: Point | null, aspect: number, radius: number) {
+  const hits = new Set<string>();
+  let remaining = strokes;
+  for (const point of samples) {
+    const ids = hitStrokes(remaining, point, previous, aspect, radius);
+    if (ids.length) {
+      for (const id of ids) hits.add(id);
+      remaining = remaining.filter(stroke => !hits.has(stroke.id));
+    }
+    previous = point;
+    if (!remaining.length) break;
+  }
+  return [...hits];
+}
+

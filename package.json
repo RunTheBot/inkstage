@@ -22,6 +22,7 @@
     "multer": "^2.0.2",
     "pdfjs-dist": "^6.4.299",
     "perfect-freehand": "^1.2.3",
+    "polygon-clipping": "^0.15.7",
     "pptxgenjs": "^4.0.1",
     "qrcode.react": "^4.2.0",
     "react": "^19.2.0",

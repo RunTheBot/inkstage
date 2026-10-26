@@ -46,3 +46,38 @@ test('remote authoritative ink preserves unacknowledged samples and a reconnect 
   replica.remote({ type: 'ink-state', slide: 0, strokes: [], op: 'reset' });
   assert.deepEqual(replica.room.strokes[0], []);
 });
+
+test('remote bursts match sequential delivery across acknowledgements, replacements and authoritative ink', () => {
+  const batched = new RoomReplica(), sequential = new RoomReplica();
+  const existing = stroke('existing');
+  const local = Array.from({ length: 20 }, (_, i) => ({ type: 'stroke-points', id: 'existing', slide: 0, op: `local-${i}`, points: [{ x: .2 + i / 100, y: .2, pressure: .5 }] }));
+  for (const replica of [batched, sequential]) {
+    replica.reset(room([structuredClone(existing)]));
+    replica.localBatch(local);
+  }
+  const burst = Array.from({ length: 240 }, (_, i) => ({ type: 'stroke-points', id: 'existing', slide: 0, op: `remote-${i}`, revision: i + 1, points: [{ x: i / 300, y: .4, pressure: i / 240 }] }));
+  const events = [
+    ...burst.slice(0, 120), ...local,
+    { type: 'stroke-replace', id: 'existing', slide: 0, op: 'replace', revision: 241, points: [{ x: .1, y: .1 }, { x: .9, y: .9 }] },
+    ...burst.slice(120).map(event => ({ ...event, revision: event.revision + 121 })),
+    { type: 'ink-state', slide: 0, op: 'state', revision: 400, strokes: [stroke('reset')] },
+  ];
+  for (const event of events) sequential.remote(event);
+  batched.remoteBatch(events);
+  assert.deepEqual(batched.room, sequential.room);
+  // All twenty local IDs must have been acknowledged, including IDs merged
+  // into the same frame; none should be resurrected by authoritative ink.
+  assert.deepEqual(batched.room.strokes[0], [stroke('reset')]);
+});
+
+test('remote point batching retains the latest revision, all samples and unchanged stroke identities', () => {
+  const replica = new RoomReplica(), original = stroke('a'), untouched = stroke('b');
+  replica.reset(room([original, untouched]));
+  const events = Array.from({ length: 240 }, (_, i) => ({ type: 'stroke-points', id: 'a', slide: 0, op: `p-${i}`, revision: i + 1, points: [{ x: i / 300, y: .4, pressure: i / 240 }] }));
+  replica.remoteBatch(events);
+  assert.equal(replica.room.revision, 240);
+  assert.deepEqual(replica.room.strokes[0][0].points, [...original.points, ...events.flatMap(event => event.points)]);
+  assert.equal(replica.room.strokes[0][1], untouched);
+  assert.equal(original.points.length, 2);
+  assert.ok(events.every(event => event.points.length === 1));
+});

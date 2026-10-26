@@ -3,6 +3,42 @@ import assert from 'node:assert/strict';
 import { vectorGeometry } from '../src/vectorInk.ts';
 import { pdfTilePlacement, pdfTiles } from '../src/pdfTiles.ts';
 
+function quadraticSamples(path) {
+  const tokens = path.match(/[A-Za-z]|-?(?:\d*\.)?\d+/g);
+  const result = [];
+  let i = 0, command = '', point = { x: 0, y: 0 }, previousControl = point;
+  const number = () => Number(tokens[i++]);
+  while (i < tokens.length) {
+    if (/[A-Za-z]/.test(tokens[i])) command = tokens[i++];
+    if (command === 'Z') break;
+    if (command === 'M') { point = { x: number(), y: number() }; previousControl = point; continue; }
+    assert.ok(command === 'Q' || command === 'T');
+    const control = command === 'Q' ? { x: number(), y: number() } : { x: 2 * point.x - previousControl.x, y: 2 * point.y - previousControl.y };
+    const end = { x: number(), y: number() };
+    for (const t of [.25, .5, .75]) result.push({
+      x: (1 - t) ** 2 * point.x + 2 * t * (1 - t) * control.x + t * t * end.x,
+      y: (1 - t) ** 2 * point.y + 2 * t * (1 - t) * control.y + t * t * end.y,
+    });
+    point = end; previousControl = control;
+  }
+  return result;
+}
+
+test('a long straight pressure stroke cannot develop ripples from SVG control rounding', () => {
+  const dx = .0717, dy = .03653, step = Math.hypot(dx, dy);
+  const points = Array.from({ length: 5000 }, (_, i) => ({ x: (100 + i * dx) / 1600, y: (100 + i * dy) / 900, pressure: .5 }));
+  const geometry = vectorGeometry({ tool: 'pen', width: 1, sensitivity: 1, points }, 16 / 9);
+  const samples = quadraticSamples(geometry.path).filter(p => {
+    const along = ((p.x - 100) * dx + (p.y - 100) * dy) / step;
+    return along > 10 && along < step * 4999 - 10;
+  });
+  assert.ok(samples.length > 1000);
+  for (const point of samples) {
+    const distance = Math.abs(((point.x - 100) * dy - (point.y - 100) * dx) / step);
+    assert.ok(Math.abs(distance - .5) < .015, `a constant half-pixel radius became ${distance}`);
+  }
+});
+
 test('normal ink retains exact slide coordinates in a resolution-independent SVG path', () => {
   const stroke = { tool: 'pen', width: 4, points: [{ x: .1, y: .2 }, { x: .5, y: .8 }] };
   assert.deepEqual(vectorGeometry(stroke, 16 / 9), { filled: false, path: 'M160,180 L800,720' });

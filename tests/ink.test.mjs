@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { snapLine, hitStrokes } from '../src/ink.ts';
+import { snapLine, hitStrokes, hitStrokesAlongPath } from '../src/ink.ts';
 test('angle snap respects aspect ratio for horizontal, vertical and diagonal lines', () => {
   const start = { x: .2, y: .2 }, aspect = 16 / 9;
   assert.ok(Math.abs(snapLine(start, { x: .8, y: .21 }, aspect).y - .2) < 1e-10);
@@ -21,4 +21,12 @@ test('eraser hits long segments, crossing paths and dots, but leaves other strok
   assert.deepEqual(hitStrokes(strokes, { x: .5, y: .6 }, { x: .5, y: .4 }, 16 / 9, .01), ['line']);
   assert.deepEqual(hitStrokes(strokes, { x: .2, y: .2 }, null, 16 / 9, .01), ['dot']);
   assert.deepEqual(hitStrokes(strokes, { x: .5, y: .1 }, null, 16 / 9, .01), []);
+});
+
+test('a coalesced eraser follows the sampled curve without erasing across its shortcut', () => {
+  const dot = (id, x, y) => ({ id, width: 4, points: [{ x, y }] });
+  const strokes = [dot('left', .2, .5), dot('top', .5, .8), dot('right', .8, .5), dot('shortcut', .5, .2)];
+  const samples = [{ x: .2, y: .8 }, { x: .8, y: .8 }, { x: .8, y: .2 }, { x: .8, y: .8 }];
+  assert.deepEqual(hitStrokesAlongPath(strokes, samples, { x: .2, y: .2 }, 16 / 9, .01), ['left', 'top', 'right']);
+  assert.equal(strokes.length, 4, 'hit testing does not mutate visible ink');
 });
